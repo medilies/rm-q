@@ -20,12 +20,12 @@
     ],
     "require": {
         "php": "^8.2",
-        "illuminate/contracts": "^10.0||^11.0"
+        "illuminate/contracts": "^10.0||^11.0",
+        "symfony/uid": "^7.1"
     },
     "require-dev": {
         "laravel/pint": "^1.14",
         "nunomaduro/collision": "^8.1.1||^7.10.0",
-        "larastan/larastan": "^2.9",
         "orchestra/testbench": "^9.0.0||^8.22.0",
         "pestphp/pest": "^2.34",
         "pestphp/pest-plugin-arch": "^2.7",
@@ -43,6 +43,7 @@
     "autoload-dev": {
         "psr-4": {
             "Tests\\": "tests/",
+            "TestApp\\": "tests/test-app/",
             "Workbench\\App\\": "workbench/app/"
         }
     },
@@ -74,7 +75,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "Medilies\\RmQ\\RmQServiceProvider"
+                "Medilies\\RmQ\\RmqServiceProvider"
             ],
             "aliases": {
                 "RmQ": "Medilies\\RmQ\\Facades\\RmQ"
