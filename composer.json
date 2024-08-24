@@ -1,13 +1,14 @@
 {
     "name": "medilies/rm-q",
-    "description": "Delete files within a transaction",
+    "description": "Delete files when time is right",
     "keywords": [
         "files",
         "delete",
         "rm",
         "safe",
         "rollback",
-        "transaction"
+        "transaction",
+        "laravel"
     ],
     "homepage": "https://github.com/medilies/rm-q",
     "license": "MIT",

@@ -1,11 +1,62 @@
-# Delete files within a transaction
+# Delete files when time is right
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3Arun-tests+branch%3Amain)
 [![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/phpstan.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3A"phpstan"+branch%3Amain)
-[![Total Downloads](https://img.shields.io/packagist/dt/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q)
+<!-- [![Total Downloads](https://img.shields.io/packagist/dt/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q) -->
 
-...
+Since file deletion is often irreversible, this Laravel package queues file deletions within a database transaction, allowing for rollback in case of errors.
+
+## The problem
+
+Let's say you have a use case that resembles this:
+
+```php
+use App\Models\Image;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+
+DB::transaction(function () use ($fileIds) {
+    $images = Image::whereIn('id', $fileIds)->get();
+
+    foreach ($images as $image) {
+        if (Storage::exists($image->path)) {
+            Storage::delete($image->path);
+        }
+
+        // more logic ...
+
+        $image->delete();
+    }
+});
+```
+
+If an error occurs while handling the second image, the database rows for both the first and second images will be rolled back by the transaction, but the actual file for the first image will be gone forever.
+
+## The solution
+
+```php
+use App\Models\Image;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Medilies\RmQ\Facades\RmQ;
+
+DB::transaction(function () use ($fileIds) {
+    $images = Image::whereIn('id', $fileIds)->get();
+
+    foreach ($images as $image) {
+        if (Storage::exists($image->path)) {
+            RmQ::stage($image->path);
+        }
+
+        // more logic ...
+
+        $image->delete();
+    }
+});
+```
+
+This way, the file deletion is queued and the deletion can be fully rolled back.
 
 ## Installation
 
@@ -15,7 +66,7 @@ Install the package via composer:
 composer require medilies/rm-q
 ```
 
-You can publish and run the migrations with:
+Publish and run the migrations with:
 
 ```bash
 php artisan vendor:publish --tag="rm-q-migrations"
@@ -28,19 +79,64 @@ You can publish the config file with:
 php artisan vendor:publish --tag="rm-q-config"
 ```
 
-This is the contents of the published config file:
-
-```php
-return [
-    
-];
-```
-
 ## Usage
 
-```php
+### Phase 1: Staging the files
 
+```php
+use Medilies\RmQ\Facades\RmQ;
+
+DB::transaction(function () {
+    // ...
+    
+    $files = '/path/to/file';
+    // or
+    $files = [
+        '/path/to/file1',
+        '/path/to/file2',
+    ];
+
+    // ...
+
+    RmQ::stage($files);
+});
 ```
+
+### Phase 2: Deleting the files
+
+Delete the files staged by the singleton:
+
+```php
+use Medilies\RmQ\Facades\RmQ;
+
+RmQ::delete();
+```
+
+Delete all the staged files:
+
+```php
+use Medilies\RmQ\Facades\RmQ;
+
+RmQ::deleteAll();
+```
+
+Delete all the staged files using a command:
+
+```shell
+php artisan rm-q:delete
+```
+
+Automatically delete the staged files at the end of the request using the middleware:
+
+```php
+use Medilies\RmQ\Middleware\RmqMiddleware;
+
+Route::put('edit-user-details', function (Request $request) {
+    // ...
+})->middleware(RmqMiddleware::class);
+```
+
+Using a Queued Job (TODO).
 
 ## Changelog
 
