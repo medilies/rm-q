@@ -15,19 +15,19 @@ class RmqStatsCommand extends Command
     public function handle(): int
     {
         /** @var array<array{Status: string, Count: int}> */
-        $rows = RmqFile::select('status', DB::raw('COUNT(*) as total')) // @phpstan-ignore-line
+        $rows = RmqFile::select('status', DB::raw('COUNT(*) as count')) // @phpstan-ignore-line
             ->groupBy('status')
             ->get()
             ->map(fn (RmqFile $row) => [
                 'Status' => $this->getStatusLabel($row->status),
-                'Count' => $row->total, // @phpstan-ignore-line
+                'Count' => $row->count, // @phpstan-ignore-line
             ])
             ->toArray();
 
         $this->table(['Status', 'Count'], [
             ...$rows,
             [
-                'Status' => 'total',
+                'Status' => 'Total',
                 'Count' => array_sum(array_column($rows, 'Count')),
             ],
         ]);

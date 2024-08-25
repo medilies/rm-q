@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Medilies\RmQ\Facades\RmQ;
+use Medilies\RmQ\Facades\RmqException;
 use Medilies\RmQ\Models\RmqFile;
 use Tests\OrchestraTestCase;
 
@@ -115,7 +116,7 @@ test('Failed transaction results in no staging', function () {
         DB::transaction(function () use ($files) {
             RmQ::stage($files);
 
-            throw new Exception('foo');
+            throw new RmqException('foo');
         });
     } catch (Throwable) {
     }

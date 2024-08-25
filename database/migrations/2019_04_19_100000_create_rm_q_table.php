@@ -23,6 +23,7 @@ return new class extends Migration
                 ->comment(RmqFile::STAGED.': staged, '.RmqFile::DELETED.': deleted, '.RmqFile::FAILED.': failed');
 
             // ? Failure message column
+            // ? retries
 
             /* ULID */
             $table->string('instance', 36);
