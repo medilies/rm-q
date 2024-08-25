@@ -5,7 +5,6 @@ namespace Medilies\RmQ\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Date;
 
 /**
  * @property int $id
@@ -49,46 +48,22 @@ final class RmqFile extends Model
         return (new self)->getTable();
     }
 
-    public function beenDeleted(?Carbon $now = null): static
-    {
-        $this->status = self::DELETED;
-        $this->deleted_at = $now;
-
-        return $this->processedNow($now);
-    }
-
-    public function failed(?Carbon $now = null): static
-    {
-        $this->status = static::FAILED;
-
-        return $this->processedNow($now);
-    }
-
-    public function processedNow(?Carbon $now = null): static
-    {
-        $now ??= Date::now();
-
-        $this->processed_at = $now;
-
-        return $this;
-    }
-
     /** @param Builder<static> $query */
     public function scopeWhereStaged(Builder $query): void
     {
-        $query->where('status', static::STAGED);
+        $query->where('status', self::STAGED);
     }
 
     /** @param Builder<static> $query */
     public function scopeWhereDeleted(Builder $query): void
     {
-        $query->where('status', static::DELETED);
+        $query->where('status', self::DELETED);
     }
 
     /** @param Builder<static> $query */
     public function scopeWhereFailed(Builder $query): void
     {
-        $query->where('status', static::FAILED);
+        $query->where('status', self::FAILED);
     }
 
     /** @param Builder<static> $query */

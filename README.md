@@ -63,6 +63,11 @@ This way, the file deletion is queued and the deletion can be fully rolled back.
 
 ## Installation
 
+Requirements:
+
+- PHP >= 8.2
+- Laravel >= 10 (not tested on lower versions)
+
 Install the package via composer:
 
 ```bash

@@ -63,15 +63,33 @@ class RmQ
     {
         $now = Date::now();
 
+        $deletedIds = $failedIds = [];
+
         RmqFile::whereStaged()
             ->whereBeforeSeconds($beforeSeconds)
             ->whereInstance($filterInstance ? $this->instance : null)
             ->get()
-            // TODO: use case when
-            ->each(function (RmqFile $file) use ($now) {
-                @unlink($file->path) ?
-                    $file->beenDeleted($now)->save() :
-                    $file->failed($now)->save();
+            ->each(function (RmqFile $file) use (&$deletedIds, &$failedIds) {
+                if (@unlink($file->path)) {
+                    $deletedIds[] = $file->id;
+                } else {
+                    $failedIds[] = $file->id;
+                }
             });
+
+        if (count($deletedIds) > 0) {
+            RmqFile::whereIn('id', $deletedIds)->update([
+                'status' => RmqFile::DELETED,
+                'processed_at' => $now,
+                'deleted_at' => $now,
+            ]);
+        }
+
+        if (count($failedIds) > 0) {
+            RmqFile::whereIn('id', $failedIds)->update([
+                'status' => RmqFile::FAILED,
+                'processed_at' => $now,
+            ]);
+        }
     }
 }
