@@ -17,6 +17,8 @@ use Illuminate\Support\Facades\Date;
  * @property ?Carbon $deleted_at
  *
  * @method static Builder|static whereStaged()
+ * @method static Builder|static whereDeleted()
+ * @method static Builder|static whereFailed()
  * @method static Builder|static whereInstance(?string $instance)
  * @method static Builder|static whereBeforeSeconds(int $beforeSeconds)
  */
@@ -75,6 +77,18 @@ final class RmqFile extends Model
     public function scopeWhereStaged(Builder $query): void
     {
         $query->where('status', static::STAGED);
+    }
+
+    /** @param Builder<static> $query */
+    public function scopeWhereDeleted(Builder $query): void
+    {
+        $query->where('status', static::DELETED);
+    }
+
+    /** @param Builder<static> $query */
+    public function scopeWhereFailed(Builder $query): void
+    {
+        $query->where('status', static::FAILED);
     }
 
     /** @param Builder<static> $query */

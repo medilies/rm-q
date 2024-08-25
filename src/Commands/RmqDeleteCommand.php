@@ -11,8 +11,6 @@ class RmqDeleteCommand extends Command
 
     public $description = 'Delete staged files';
 
-    // TODO: add a job
-
     public function handle(): int
     {
         RmQ::deleteAll();

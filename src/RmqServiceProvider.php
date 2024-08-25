@@ -3,7 +3,9 @@
 namespace Medilies\RmQ;
 
 use Illuminate\Support\ServiceProvider;
+use Medilies\RmQ\Commands\RmqCleanupCommand;
 use Medilies\RmQ\Commands\RmqDeleteCommand;
+use Medilies\RmQ\Commands\RmqStatsCommand;
 
 class RmqServiceProvider extends ServiceProvider
 {
@@ -47,6 +49,8 @@ class RmqServiceProvider extends ServiceProvider
 
         $this->commands([
             RmqDeleteCommand::class,
+            RmqCleanupCommand::class,
+            RmqStatsCommand::class,
         ]);
     }
 }

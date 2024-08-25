@@ -105,6 +105,9 @@ DB::transaction(function () {
 });
 ```
 
+> [!WARNING]  
+> Make sure to not call `Rmq::stage` within a loop since each call does a database insertion.
+
 ### Phase 2: Deleting the files
 
 Delete the files staged by the singleton:
@@ -123,7 +126,7 @@ use Medilies\RmQ\Facades\RmQ;
 RmQ::deleteAll();
 ```
 
-Delete all the staged files using a command:
+Delete all the staged files using a command (you can also [schedule](https://laravel.com/docs/11.x/scheduling#scheduling-artisan-commands) it):
 
 ```shell
 php artisan rm-q:delete
@@ -140,8 +143,6 @@ Route::put('edit-user-details', function (Request $request) {
     // ...
 })->middleware(RmqMiddleware::class);
 ```
-
-Using a Queued Job (TODO).
 
 ## Changelog
 
