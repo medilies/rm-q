@@ -4,6 +4,7 @@ namespace Medilies\RmQ\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Medilies\RmQ\Facades\RmqException;
 use Medilies\RmQ\Models\RmqFile;
 
 class RmqStatsCommand extends Command
@@ -41,7 +42,7 @@ class RmqStatsCommand extends Command
             RmqFile::STAGED => 'Staged',
             RmqFile::DELETED => 'Deleted',
             RmqFile::FAILED => 'Failed',
-            default => 'Unknown',
+            default => throw new RmqException("Unhandled status '{$status}'"),
         };
     }
 }

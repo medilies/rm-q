@@ -4,18 +4,26 @@ namespace Medilies\RmQ\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Medilies\RmQ\Facades\RmQ;
+use Illuminate\Support\Facades\Log;
+use Medilies\RmQ\RmQ;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 class RmqMiddleware
 {
+    public function __construct(private RmQ $rmq) {}
+
     public function handle(Request $request, Closure $next): Response
     {
-        // ? set singleton to stage in array
+        $this->rmq->useArray();
 
         $response = $next($request);
 
-        RmQ::delete();
+        try {
+            $this->rmq->delete();
+        } catch (Throwable $th) {
+            Log::error('Failed while deleting the following files ['.implode(', ', $this->rmq->getStore()).'] with error: '.$th->getMessage());
+        }
 
         return $response;
     }

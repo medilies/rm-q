@@ -12,21 +12,58 @@ class RmQ
 {
     private string $instance;
 
+    private bool $useArray = false;
+
+    /** @var string[] */
+    private array $store = [];
+
     public function __construct()
     {
         $this->instance = (new Ulid)->toRfc4122();
     }
 
+    public function useArray(): static
+    {
+        $this->useArray = true;
+
+        return $this;
+    }
+
     /** @param  string[]|string  $paths */
     public function stage(array|string $paths): void
     {
-        // TODO: take query builder with one selected column
+        // TODO: take query builder with one selected column => force stageInDb
         // ? validate not empty or exists?
-        // ? Stage in array and persist by the end of the process. The middleware can parametrize the singleton
 
+        $this->useArray ?
+            $this->stageInArray($paths) :
+            $this->stageInDb($paths);
+    }
+
+    /** @param  string[]|string  $paths */
+    private function stageInArray(array|string $paths): void
+    {
+        if (is_string($paths)) {
+            $this->store[] = $paths;
+
+            return;
+        }
+
+        /** @var string[] */
+        $newPaths = collect($paths)
+            ->filter(fn (mixed $path) => is_string($path))
+            ->toArray();
+
+        $this->store = array_merge($this->store, $newPaths);
+    }
+
+    /** @param  string[]|string  $paths */
+    private function stageInDb(array|string $paths): void
+    {
         $data = match (true) {
             is_string($paths) => $this->pathToRecord($paths),
             is_array($paths) => collect($paths)
+                ->filter(fn (mixed $path) => is_string($path))
                 ->map(fn (string $path) => $this->pathToRecord($path))
                 ->toArray(),
         };
@@ -36,7 +73,9 @@ class RmQ
 
     public function delete(): void
     {
-        $this->performDelete(true);
+        $this->useArray ?
+            $this->performDeleteUsingArray() :
+            $this->performDeleteUsingDb(true);
     }
 
     public function deleteAll(): void
@@ -47,19 +86,20 @@ class RmQ
             throw new TypeError('rm-q.after must be an integer');
         }
 
-        $this->performDelete(false, $after);
+        $this->performDeleteUsingDb(false, $after);
     }
 
     /** @return array{path: string, instance: string} */
-    private function pathToRecord(string $path): array
+    private function pathToRecord(string $path, int $status = RmqFile::STAGED): array
     {
         return [
             'path' => $path,
             'instance' => $this->instance,
+            'status' => $status,
         ];
     }
 
-    private function performDelete(bool $filterInstance = false, int $beforeSeconds = 0): void
+    private function performDeleteUsingDb(bool $filterInstance = false, int $beforeSeconds = 0): void
     {
         $now = Date::now();
 
@@ -91,5 +131,39 @@ class RmQ
                 'processed_at' => $now,
             ]);
         }
+    }
+
+    private function performDeleteUsingArray(): void
+    {
+        $now = Date::now();
+
+        $data = [];
+
+        foreach ($this->store as $path) {
+            if (@unlink($path)) {
+                $data[] = [
+                    'path' => $path,
+                    'instance' => $this->instance,
+                    'status' => RmqFile::DELETED,
+                    'processed_at' => $now,
+                    'deleted_at' => $now,
+                ];
+            } else {
+                $data[] = [
+                    'path' => $path,
+                    'instance' => $this->instance,
+                    'status' => RmqFile::FAILED,
+                    'processed_at' => $now,
+                ];
+            }
+        }
+
+        RmqFile::insert($data);
+    }
+
+    /** @return string[] */
+    public function getStore(): array
+    {
+        return $this->store;
     }
 }
