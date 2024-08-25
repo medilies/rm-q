@@ -11,6 +11,8 @@ class RmqMiddleware
 {
     public function handle(Request $request, Closure $next): Response
     {
+        // ? set singleton to stage in array
+
         $response = $next($request);
 
         RmQ::delete();

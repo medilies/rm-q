@@ -21,7 +21,7 @@ class RmQ
     public function stage(array|string $paths): void
     {
         // TODO: take query builder with one selected column
-        // ? validate paths
+        // ? validate not empty or exists?
         // ? Stage in array and persist by the end of the process. The middleware can parametrize the singleton
 
         $data = match (true) {
@@ -67,6 +67,7 @@ class RmQ
             ->whereBeforeSeconds($beforeSeconds)
             ->whereInstance($filterInstance ? $this->instance : null)
             ->get()
+            // TODO: use case when
             ->each(function (RmqFile $file) use ($now) {
                 @unlink($file->path) ?
                     $file->beenDeleted($now)->save() :

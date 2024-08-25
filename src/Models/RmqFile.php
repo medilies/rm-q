@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Date;
  * @property int $id
  * @property string $path
  * @property int $status
- * @property ?Carbon $staged_at
  * @property ?string $instance
+ * @property ?Carbon $staged_at
  * @property ?Carbon $processed_at
  * @property ?Carbon $deleted_at
  *
