@@ -2,7 +2,7 @@
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3Arun-tests+branch%3Amain)
-[![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/phpstan.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3A"phpstan"+branch%3Amain)
+[![phpstan](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/phpstan.yml?branch=main&label=phpstan&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3A"phpstan"+branch%3Amain)
 <!-- [![Total Downloads](https://img.shields.io/packagist/dt/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q) -->
 
 Since file deletion is often irreversible, this Laravel package queues file deletions within a database transaction, allowing for rollback in case of errors.
@@ -44,15 +44,18 @@ use Medilies\RmQ\Facades\RmQ;
 DB::transaction(function () use ($fileIds) {
     $images = Image::whereIn('id', $fileIds)->get();
 
+    $files = [];
     foreach ($images as $image) {
         if (Storage::exists($image->path)) {
-            RmQ::stage($image->path);
+            $files[] = $image->path;
         }
 
         // more logic ...
 
         $image->delete();
     }
+
+    RmQ::stage($files);
 });
 ```
 
@@ -125,6 +128,8 @@ Delete all the staged files using a command:
 ```shell
 php artisan rm-q:delete
 ```
+
+> `deleteAll` takes into consideration the `after` config to fetch staged entries.
 
 Automatically delete the staged files at the end of the request using the middleware:
 

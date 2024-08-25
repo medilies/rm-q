@@ -22,9 +22,10 @@
     "require": {
         "php": "^8.2",
         "illuminate/contracts": "^10.0||^11.0",
-        "symfony/uid": "^7.1"
+        "symfony/uid": "^6.0||^7.0"
     },
     "require-dev": {
+        "larastan/larastan": "^2.0",
         "laravel/pint": "^1.14",
         "nunomaduro/collision": "^8.1.1||^7.10.0",
         "orchestra/testbench": "^9.0.0||^8.22.0",
