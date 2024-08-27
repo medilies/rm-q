@@ -2,29 +2,55 @@
 
 namespace Medilies\RmQ;
 
+use Closure;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use Medilies\RmQ\Models\RmqFile;
 use Symfony\Component\Uid\Ulid;
+use Throwable;
 use TypeError;
 
 class RmQ
 {
     private string $instance;
 
-    private bool $useArray = false;
+    private bool $isUsingMiddleware = false;
+
+    private bool $isWithinTransaction = false;
+
+    private bool $hasFilesInDb = false;
 
     /** @var string[] */
-    private array $store = [];
+    private array $arrayStorage = []; // ? Dto[]
+
+    /** @var string[] */
+    private array $transactionStorage = [];
 
     public function __construct()
     {
         $this->instance = (new Ulid)->toRfc4122();
     }
 
-    public function useArray(): static
+    public function transaction(Closure $callback): static
     {
-        $this->useArray = true;
+        $this->withinTransaction();
+
+        try {
+            DB::transaction($callback); // @phpstan-ignore-line
+
+            if ($this->isUsingMiddleware) {
+                $this->arrayStorage = array_merge($this->arrayStorage, $this->transactionStorage);
+            } else {
+                $this->stageInDb($this->transactionStorage);
+            }
+        } catch (Throwable $th) {
+            throw $th;
+        } finally {
+            $this->transactionStorage = [];
+
+            $this->withinTransaction(false);
+        }
 
         return $this;
     }
@@ -35,16 +61,16 @@ class RmQ
         // TODO: take query builder with one selected column => force stageInDb
         // ? validate not empty or exists?
 
-        $this->useArray ?
-            $this->stageInArray($paths) :
+        $this->isWithinTransaction ?
+            $this->stageInTransactionStorage($paths) :
             $this->stageInDb($paths);
     }
 
     /** @param  string[]|string  $paths */
-    private function stageInArray(array|string $paths): void
+    private function stageInTransactionStorage(array|string $paths): void
     {
         if (is_string($paths)) {
-            $this->store[] = $paths;
+            $this->transactionStorage[] = $paths;
 
             return;
         }
@@ -54,28 +80,29 @@ class RmQ
             ->filter(fn (mixed $path) => is_string($path))
             ->toArray();
 
-        $this->store = array_merge($this->store, $newPaths);
+        $this->transactionStorage = array_merge($this->transactionStorage, $newPaths);
     }
 
     /** @param  string[]|string  $paths */
     private function stageInDb(array|string $paths): void
     {
         $data = match (true) {
-            is_string($paths) => $this->pathToRecord($paths),
+            is_string($paths) => $this->pathToStagedRecord($paths),
             is_array($paths) => collect($paths)
                 ->filter(fn (mixed $path) => is_string($path))
-                ->map(fn (string $path) => $this->pathToRecord($path))
+                ->map(fn (string $path) => $this->pathToStagedRecord($path))
                 ->toArray(),
         };
 
         RmqFile::insert($data);
+
+        $this->hasFilesInDb = true;
     }
 
     public function delete(): void
     {
-        $this->useArray ?
-            $this->performDeleteUsingArray() :
-            $this->performDeleteUsingDb(true);
+        $this->performDeleteUsingDb(true);
+        $this->performDeleteUsingArrayStorage();
     }
 
     public function deleteAll(): void
@@ -86,17 +113,11 @@ class RmQ
             throw new TypeError('rm-q.after must be an integer');
         }
 
-        $this->performDeleteUsingDb(false, $after);
-    }
+        if ($this->hasFilesInDb) {
+            $this->performDeleteUsingDb(false, $after);
+        }
 
-    /** @return array{path: string, instance: string} */
-    private function pathToRecord(string $path, int $status = RmqFile::STAGED): array
-    {
-        return [
-            'path' => $path,
-            'instance' => $this->instance,
-            'status' => $status,
-        ];
+        $this->performDeleteUsingArrayStorage();
     }
 
     private function performDeleteUsingDb(bool $filterInstance = false, int $beforeSeconds = 0): void
@@ -131,15 +152,17 @@ class RmQ
                 'processed_at' => $now,
             ]);
         }
+
+        $this->hasFilesInDb = false;
     }
 
-    private function performDeleteUsingArray(): void
+    private function performDeleteUsingArrayStorage(): void
     {
         $now = Date::now();
 
         $data = [];
 
-        foreach ($this->store as $path) {
+        foreach ($this->arrayStorage as $path) {
             if (@unlink($path)) {
                 $data[] = [
                     'path' => $path,
@@ -161,9 +184,33 @@ class RmQ
         RmqFile::insert($data);
     }
 
-    /** @return string[] */
-    public function getStore(): array
+    public function usingMiddleware(bool $flag = true): static
     {
-        return $this->store;
+        $this->isUsingMiddleware = $flag;
+
+        return $this;
+    }
+
+    public function withinTransaction(bool $flag = true): static
+    {
+        $this->isWithinTransaction = $flag;
+
+        return $this;
+    }
+
+    /** @return array{path: string} */
+    private function pathToStagedRecord(string $path): array
+    {
+        return [
+            'path' => $path,
+            'instance' => $this->instance,
+            'status' => RmqFile::STAGED,
+        ];
+    }
+
+    /** @return string[] */
+    public function getStorage(): array
+    {
+        return $this->arrayStorage;
     }
 }

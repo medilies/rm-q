@@ -15,14 +15,14 @@ class RmqMiddleware
 
     public function handle(Request $request, Closure $next): Response
     {
-        $this->rmq->useArray();
+        $this->rmq->usingMiddleware();
 
         $response = $next($request);
 
         try {
             $this->rmq->delete();
         } catch (Throwable $th) {
-            Log::error('Failed while deleting the following files ['.implode(', ', $this->rmq->getStore()).'] with error: '.$th->getMessage());
+            Log::error('Failed while deleting the following files ['.implode(', ', $this->rmq->getStorage()).'] with error: '.$th->getMessage());
         }
 
         return $response;
