@@ -1,9 +1,13 @@
-# Delete files when time is right
+# Queue and avoid disastrous file deletions
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3Arun-tests+branch%3Amain)
 [![phpstan](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/phpstan.yml?branch=main&label=phpstan&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3A"phpstan"+branch%3Amain)
 <!-- [![Total Downloads](https://img.shields.io/packagist/dt/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q) -->
+
+<div style="text-align: center;">
+  <img src="./concept-meme.webp" alt="concept meme" width="666px">
+</div>
 
 Since file deletion is often irreversible, this Laravel package queues file deletions within a database transaction, allowing for rollback in case of errors.
 
@@ -12,21 +16,16 @@ Since file deletion is often irreversible, this Laravel package queues file dele
 Let's say you have a use case that resembles this:
 
 ```php
-use App\Models\Image;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
-DB::transaction(function () use ($fileIds) {
-    $images = Image::whereIn('id', $fileIds)->get();
-
+DB::transaction(function () use ($images) {
+    /** @var \App\Models\Image $image */
     foreach ($images as $image) {
-        if (Storage::exists($image->path)) {
-            Storage::delete($image->path);
-        }
+        $image->delete();
+        Storage::delete($image->path);
 
         // more logic ...
-
-        $image->delete();
     }
 });
 ```
@@ -36,27 +35,20 @@ If an error occurs while handling the second image, the database rows for both t
 ## The solution
 
 ```php
-use App\Models\Image;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Facades\RmQ;
 
-DB::transaction(function () use ($fileIds) {
-    $images = Image::whereIn('id', $fileIds)->get();
-
-    $files = [];
+RmQ::transaction(function () use ($images) {
+    /** @var \App\Models\Image $image */
     foreach ($images as $image) {
-        if (Storage::exists($image->path)) {
-            $files[] = $image->path;
-        }
+        $image->delete();
+        RmQ::stage($image->path);
 
         // more logic ...
-
-        $image->delete();
     }
-
-    RmQ::stage($files);
 });
+
+RmQ::delete();
 ```
 
 This way, the file deletion is queued and the deletion can be fully rolled back.
@@ -66,7 +58,7 @@ This way, the file deletion is queued and the deletion can be fully rolled back.
 Requirements:
 
 - PHP >= 8.2
-- Laravel >= 10 (not tested on lower versions)
+- Laravel >= 10 (not tested on older versions).
 
 Install the package via composer:
 
@@ -94,7 +86,7 @@ php artisan vendor:publish --tag="rm-q-config"
 ```php
 use Medilies\RmQ\Facades\RmQ;
 
-DB::transaction(function () {
+RmQ::transaction(function () {
     // ...
     
     $files = '/path/to/file';
@@ -110,8 +102,10 @@ DB::transaction(function () {
 });
 ```
 
-> [!WARNING]  
-> Make sure to not call `Rmq::stage` within a loop since each call does a database insertion.
+> [!IMPORTANT]  
+> If you use `DB::transaction` instead of `RmQ::transaction` make sure to not call `Rmq::stage` within a loop since each call will perform a database insertion.
+>
+> Using the middleware will optimize the performance further more by not doing any query until the end of the request performing a total of 1 to 3 queries.
 
 ### Phase 2: Deleting the files
 

@@ -1,6 +1,6 @@
 {
     "name": "medilies/rm-q",
-    "description": "Delete files when time is right",
+    "description": "Queue and avoid disastrous file deletions",
     "keywords": [
         "files",
         "delete",
