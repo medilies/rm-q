@@ -2,6 +2,7 @@
 
 namespace Medilies\RmQ;
 
+use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\Connection;
@@ -157,25 +158,77 @@ class RmQ
         $start = Date::now();
         $report = new DeletionReport($limit);
 
-        // Rows whose sweep died mid-chunk.
-        $this->sweep(fn (Builder $query) => $query
-            ->where('status', Status::Processing->value)
-            ->where('claimed_at', '<=', $start->copy()->subSeconds(Settings::int('claim_timeout'))), $report);
-
-        // Staged rows past their grace period.
-        $this->sweep(fn (Builder $query) => $query
-            ->where('status', Status::Staged->value)
-            ->where('staged_at', '<=', $start->copy()->subSeconds($after)), $report);
-
-        // Retries, at most once per run.
-        $this->sweep(fn (Builder $query) => $query
-            ->where('status', Status::Failed->value)
-            ->where('attempts', '<', Settings::int('max_attempts', 1))
-            ->where('processed_at', '<', $start), $report);
+        $this->sweep(fn (Builder $query) => $this->abandoned($query, $start), $report);
+        $this->sweep(fn (Builder $query) => $this->stagedBefore($query, $start->copy()->subSeconds($after)), $report);
+        $this->sweep(fn (Builder $query) => $this->retryable($query, $start), $report);
 
         $this->finish($report);
 
         return $report;
+    }
+
+    /**
+     * How many rows deleteAll() would process right now, per pass.
+     *
+     * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after`.
+     * @return array{abandoned: int, staged: int, retries: int}
+     *
+     * @throws RmqException With invalid arguments or config.
+     */
+    public function countDeletable(?int $after = null): array
+    {
+        if ($after !== null && $after < 0) {
+            throw RmqException::invalidArgument('after', 'an integer greater than or equal to 0');
+        }
+
+        $after ??= Settings::int('after');
+        $now = Date::now();
+
+        return [
+            'abandoned' => $this->abandoned(RmqFile::query(), $now)->count(),
+            'staged' => $this->stagedBefore(RmqFile::query(), $now->copy()->subSeconds($after))->count(),
+            'retries' => $this->retryable(RmqFile::query(), $now)->count(),
+        ];
+    }
+
+    /**
+     * Rows whose sweep died mid-chunk.
+     *
+     * @param  Builder<RmqFile>  $query
+     * @return Builder<RmqFile>
+     */
+    private function abandoned(Builder $query, CarbonInterface $now): Builder
+    {
+        return $query
+            ->where('status', Status::Processing->value)
+            ->where('claimed_at', '<=', $now->copy()->subSeconds(Settings::int('claim_timeout')));
+    }
+
+    /**
+     * Staged rows whose grace period is over.
+     *
+     * @param  Builder<RmqFile>  $query
+     * @return Builder<RmqFile>
+     */
+    private function stagedBefore(Builder $query, CarbonInterface $cutoff): Builder
+    {
+        return $query
+            ->where('status', Status::Staged->value)
+            ->where('staged_at', '<=', $cutoff);
+    }
+
+    /**
+     * Failed rows with attempts left; a row that failed during this run waits for the next one.
+     *
+     * @param  Builder<RmqFile>  $query
+     * @return Builder<RmqFile>
+     */
+    private function retryable(Builder $query, CarbonInterface $runStart): Builder
+    {
+        return $query
+            ->where('status', Status::Failed->value)
+            ->where('attempts', '<', Settings::int('max_attempts', 1))
+            ->where('processed_at', '<', $runStart);
     }
 
     /**

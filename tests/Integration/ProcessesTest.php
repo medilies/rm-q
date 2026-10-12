@@ -16,7 +16,7 @@ it('deletes from a fresh process', function () {
 
     expect($result->errorOutput())->toBe('')
         ->and($result->successful())->toBeTrue()
-        ->and($result->output())->toContain('Deleted 1 staged file(s), 0 failed.')
+        ->and($result->output())->toMatch('/\|\s*Deleted\s*\|\s*1\s*\|/')
         ->and($file)->not->toBeFile()
         ->and(RmqFile::query()->sole()->status)->toBe(Status::Deleted);
 });
@@ -39,10 +39,11 @@ it('processes each row exactly once with concurrent sweeps', function () {
     foreach ($results->collect() as $name => $result) {
         expect($result->successful())->toBeTrue("{$name}: {$result->errorOutput()}");
 
-        expect(preg_match('/Deleted (\d+) staged file\(s\), (\d+) failed\./', $result->output(), $matches))->toBe(1, $result->output());
-        $deletedPerWorker[$name] = (int) $matches[1];
+        expect(preg_match('/\|\s*Deleted\s*\|\s*(\d+)\s*\|/', $result->output(), $matches))->toBe(1, $result->output())
+            ->and($result->output())->toMatch('/\|\s*Failed, will retry\s*\|\s*0\s*\|/')
+            ->and($result->output())->toMatch('/\|\s*Failed, gave up\s*\|\s*0\s*\|/');
 
-        expect((int) $matches[2])->toBe(0);
+        $deletedPerWorker[$name] = (int) $matches[1];
     }
 
     // The workers' counts add up exactly: no row was deleted twice.

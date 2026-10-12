@@ -64,6 +64,7 @@ RmQ::stage(string|Stringable|iterable $paths, ?string $disk = null): int  // nul
 RmQ::transaction(Closure $callback, int $attempts = 1): mixed  // = DB::connection(rm-q.connection)->transaction()
 RmQ::delete(): void            // sweep rows staged by this request/job; deferred to after the outermost commit
 RmQ::deleteAll(?int $after = null, ?int $limit = null): DeletionReport  // throws RmqException inside a transaction
+RmQ::countDeletable(?int $after = null): array  // rows deleteAll() would process now: abandoned / staged / retries
 RmQ::instanceId(): string
 ```
 
@@ -501,15 +502,15 @@ Schedule::command('rm-q:cleanup')->daily()->onOneServer();
     env vars.
 - [x] Regression tests for #1–#3 and #6–#11 (see the Phase 2 notes).
 
-### Phase 3 — Trait, middleware, commands, events (#4, #5, #12)
+### Phase 3 — Trait, middleware, commands, events (#4, #5, #12) ✅
 
-- [ ] Trait per 3.9.
-- [x] Middleware per 3.10. Done in Phase 2: the old middleware depended on the removed in-memory API.
-- [ ] Job middleware per 3.10.
-- [ ] Commands per 3.11. Phase 2 only adapted them to the new core: `rm-q:delete` prints counts,
-  `rm-q:cleanup` uses the enum, `rm-q:stats` shows `Unknown (n)`.
-- [x] Events and the failure log per 3.5. Done in Phase 2: the sweep dispatches them.
-- [ ] Regression tests for #4, #5 (local + disks done in Phase 2), #12 and the commands.
+- [x] Trait per 3.9, with the deviations listed in the Phase 3 notes.
+- [x] Middleware per 3.10 (done in Phase 2).
+- [x] Job middleware `Medilies\RmQ\Queue\DeleteStagedFiles`.
+- [x] Commands per 3.11: `rm-q:delete` (`--after`, `--limit`, `--dry-run`, `Isolatable`, exit codes),
+  `rm-q:cleanup` (`--days`, `--with-failed`, chunked), `rm-q:stats` (`--json`, details), new `rm-q:retry`.
+- [x] Events and the failure log per 3.5 (done in Phase 2).
+- [x] Regression tests for #4, #5, #12 and the commands.
 
 ### Phase 4 — Docs & release
 
@@ -708,3 +709,36 @@ MariaDB and Postgres run only in CI: there is no `pdo_pgsql` locally. Postgres w
   silently skipped or staged.
 - `rm-q:cleanup` still deletes every Deleted row; retention arrives in Phase 3.
 - `RmQ::transaction()` is now a plain transaction on the rm-q connection; `stage()` inserts inside it.
+
+### Phase 3 (2026-10-12)
+
+**Results:** 118 tests (5,388 assertions). Pint, PHPStan, `composer validate --strict` and `--strict-psr` are green.
+
+| Combination (local) | Tests | PHPStan |
+|---|---|---|
+| PHP 8.4, L13.35, SQLite | 118 ✓ | ✓ |
+| PHP 8.4, L13.35, MySQL 8.0, session tz `+05:00` | 118 ✓ | — |
+| PHP 8.4, L12.69, stable | 118 ✓ | ✓ |
+| PHP 8.3, L12.69 lowest | 118 ✓ | ✓ |
+| PHP 8.3, L13.30 lowest | 118 ✓ | ✓ |
+
+**Deviations from the specs:**
+
+- **Unloaded columns are read, not rejected.** Spec 3.9 said to throw a `LogicException` when a path column was
+  not loaded. Instead, the trait reads missing columns in `deleting`, while the row still exists. This keeps
+  `Model::select('id')->get()->each->delete()` working, at the cost of one extra query. Paths are also validated in
+  `deleting`, so an invalid path aborts the deletion before the record is gone. They are staged in `deleted`, once
+  the DELETE has succeeded.
+- **`listFilePathColumns()` is typed `array<int|string, ?string>`.** List entries must be column names;
+  anything else throws a `LogicException`. Map entries may use a null disk.
+- **The soft-delete check takes a `Model` parameter.** Analysed inside a SoftDeletes model, `method_exists($this,
+  ...)` was "always true" for older PHPStan versions.
+- **New public method `RmQ::countDeletable()`.** It shares its filters with `deleteAll()`, so `--dry-run` and
+  `rm-q:stats` count exactly what a run would process.
+- **`rm-q:delete` output and exit codes.** It prints a Result/Count table plus the duration, and exits `INVALID`
+  (2) on bad options and `FAILURE` (1) when a file used up its attempts during the run.
+- **`rm-q:cleanup` keeps rows for `cleanup_after_days` (30) by default.** Use `--days=0` for the old "remove
+  everything processed" behaviour. Limited DELETEs compile on every grammar: Postgres uses `ctid`, SQLite
+  `rowid`, MySQL/MariaDB `LIMIT`, SQL Server `TOP`.
+- **`rm-q:stats --json` shape:** `statuses` (label ⇒ count), `total`, `oldest_staged_at` (ISO-8601 or null),
+  `deletable_now` (abandoned/staged/retries) and `failed_gave_up`.

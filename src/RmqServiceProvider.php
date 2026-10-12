@@ -6,6 +6,7 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
 use Medilies\RmQ\Commands\RmqCleanupCommand;
 use Medilies\RmQ\Commands\RmqDeleteCommand;
+use Medilies\RmQ\Commands\RmqRetryCommand;
 use Medilies\RmQ\Commands\RmqStatsCommand;
 use Medilies\RmQ\Middleware\RmqMiddleware;
 
@@ -54,6 +55,7 @@ class RmqServiceProvider extends ServiceProvider
             RmqDeleteCommand::class,
             RmqCleanupCommand::class,
             RmqStatsCommand::class,
+            RmqRetryCommand::class,
         ]);
     }
 }
