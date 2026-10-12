@@ -105,11 +105,37 @@ it('only stages local paths inside the allowed directories', function () {
         ->and(fn () => RmQ::stage($allowed.'-evil'.DIRECTORY_SEPARATOR.'file.txt'))->toThrow(RmqException::class, 'allowed_directories');
 });
 
-it('validates the allowed directories config', function () {
-    config(['rm-q.allowed_directories' => ['relative/dir']]);
+it('does not let a symlinked directory escape the allowed directories', function () {
+    $allowed = $this->temporaryDirectory();
+    $outside = $this->temporaryDirectory();
+    file_put_contents($outside.DIRECTORY_SEPARATOR.'secret.txt', 'secret');
+    symlink($outside, $allowed.DIRECTORY_SEPARATOR.'link');
+    config(['rm-q.allowed_directories' => [$allowed]]);
 
-    expect(fn () => RmQ::stage($this->temporaryFile()))->toThrow(RmqException::class, 'rm-q.allowed_directories');
-});
+    expect(fn () => RmQ::stage($allowed.DIRECTORY_SEPARATOR.'link'.DIRECTORY_SEPARATOR.'secret.txt'))
+        ->toThrow(RmqException::class, 'allowed_directories');
+})->skipOnWindows();
+
+it('resolves allowed directories that are symlinks', function () {
+    $real = $this->temporaryDirectory();
+    $alias = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'alias';
+    symlink($real, $alias);
+    config(['rm-q.allowed_directories' => [$alias]]);
+
+    expect(RmQ::stage($real.DIRECTORY_SEPARATOR.'file.txt'))->toBe(1)
+        ->and(RmQ::stage($alias.DIRECTORY_SEPARATOR.'other.txt'))->toBe(1);
+})->skipOnWindows();
+
+it('validates its config', function (array $config, string $key) {
+    config($config);
+
+    expect(fn () => RmQ::stage($this->temporaryFile()))->toThrow(RmqException::class, $key);
+})->with([
+    'relative allowed directory' => [['rm-q.allowed_directories' => ['relative/dir']], 'rm-q.allowed_directories'],
+    'allowed directories not a list' => [['rm-q.allowed_directories' => '/tmp'], 'rm-q.allowed_directories'],
+    'connection not a name' => [['rm-q.connection' => ['mysql']], 'rm-q.connection'],
+    'empty table name' => [['rm-q.table' => ''], 'rm-q.table'],
+]);
 
 it('stores the staging time from PHP, not from the database clock', function () {
     $this->travelTo(now()->subYears(5)->startOfSecond());

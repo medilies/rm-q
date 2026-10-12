@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
 use Illuminate\Database\Connection;
+use Illuminate\Database\DetectsConcurrencyErrors;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Date;
@@ -34,8 +35,13 @@ use Throwable;
  */
 class RmQ
 {
+    use DetectsConcurrencyErrors;
+
     /** 6 columns per row: stays well below SQL Server's 2100 bindings limit. */
     private const INSERT_CHUNK = 150;
+
+    /** Tries per sweep statement when it loses a deadlock or a lock race. */
+    private const STATEMENT_ATTEMPTS = 5;
 
     private readonly string $instance;
 
@@ -244,35 +250,36 @@ class RmQ
 
         while (! $report->limitReached()) {
             // The write connection: a lagging read replica could hide freshly staged or claimed rows.
-            $ids = $eligible(RmqFile::query()->useWritePdo())
+            $ids = $this->retryOnConcurrencyError(fn () => $eligible(RmqFile::query()->useWritePdo())
                 ->limit($report->nextChunkSize($chunk))
                 ->pluck('id')
-                ->all();
+                ->all());
 
             if ($ids === []) {
                 return;
             }
 
             // Re-applying the eligibility predicate makes the claim atomic between concurrent sweeps.
-            $claimed = $eligible(RmqFile::query())
+            $claimed = $this->retryOnConcurrencyError(fn () => $eligible(RmqFile::query())
                 ->whereIntegerInRaw('id', $ids)
                 ->increment('attempts', 1, [
                     'status' => Status::Processing->value,
                     'claimed_by' => $token,
                     'claimed_at' => Date::now(),
-                ]);
+                ]));
 
             if ($claimed === 0) {
                 continue; // Lost to a concurrent sweep.
             }
 
-            $files = RmqFile::query()->useWritePdo()
+            $files = $this->retryOnConcurrencyError(fn () => RmqFile::query()->useWritePdo()
                 ->whereIntegerInRaw('id', $ids)
                 ->where('claimed_by', $token)
-                ->get(['id', 'path', 'disk', 'attempts']);
+                ->get(['id', 'path', 'disk', 'attempts']));
 
             $deleted = [];
             $failed = [];
+            $failures = [];
 
             foreach ($files as $file) {
                 $outcome = $this->deleteFile($file);
@@ -287,30 +294,54 @@ class RmQ
 
                 $willRetry = $file->attempts < $maxAttempts;
                 $report->recordFailure($file->path, $file->disk, $outcome->error, ! $willRetry);
-                Event::dispatch(new FileDeletionFailed(
+                $failures[] = new FileDeletionFailed(
                     $file->id, $file->path, $file->disk, $outcome->error, $file->attempts, $willRetry,
-                ));
+                );
             }
 
             $now = Date::now();
 
             // Conditional on the claim: a row reclaimed by another sweep meanwhile is left alone.
             if ($deleted !== []) {
-                RmqFile::query()
+                $this->retryOnConcurrencyError(fn () => RmqFile::query()
                     ->whereIntegerInRaw('id', $deleted)
                     ->where('claimed_by', $token)
-                    ->update(['status' => Status::Deleted->value, 'processed_at' => $now, 'error' => null]);
+                    ->update(['status' => Status::Deleted->value, 'processed_at' => $now, 'error' => null]));
 
                 $report->deleted += count($deleted);
             }
 
             foreach ($failed as $error => $failedIds) {
-                RmqFile::query()
+                $this->retryOnConcurrencyError(fn () => RmqFile::query()
                     ->whereIntegerInRaw('id', $failedIds)
                     ->where('claimed_by', $token)
-                    ->update(['status' => Status::Failed->value, 'processed_at' => $now, 'error' => (string) $error]);
+                    ->update(['status' => Status::Failed->value, 'processed_at' => $now, 'error' => (string) $error]));
+            }
+
+            // Only once the outcomes are recorded: a throwing listener can't leave rows claimed.
+            foreach ($failures as $failure) {
+                Event::dispatch($failure);
             }
         }
+    }
+
+    /**
+     * Retry a sweep statement that lost a deadlock or a lock race. Sweeps never run inside a transaction, so each
+     * statement can be retried on its own.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $statement
+     * @return TResult
+     */
+    private function retryOnConcurrencyError(Closure $statement): mixed
+    {
+        return retry(
+            self::STATEMENT_ATTEMPTS,
+            fn () => $statement(),
+            fn (int $attempt) => random_int(10, 50) * $attempt,
+            fn (Throwable $e) => $this->causedByConcurrencyError($e),
+        );
     }
 
     private function deleteFile(RmqFile $file): Outcome

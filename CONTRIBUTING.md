@@ -19,6 +19,14 @@ DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=3306 DB_DATABASE=rm_q_test DB_USER
 
 Add `RM_Q_TEST_DB_TIMEZONE=+05:00` to skew the database session timezone, as CI does.
 
+## Coverage
+
+```bash
+composer test-coverage   # needs the pcov or Xdebug extension
+```
+
+CI fails below 95% line coverage, and uploads the Clover and HTML reports as the `coverage-report` artifact.
+
 ## Static analysis
 
 ```bash

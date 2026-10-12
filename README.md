@@ -60,7 +60,11 @@ picked up later by the `rm-q:delete` command.
 
 ## Installation
 
-Requirements: PHP 8.2+ and Laravel 12 or 13.
+Requirements:
+
+- PHP 8.2+ and Laravel 12 or 13.
+- SQLite, MySQL, MariaDB or PostgreSQL. CI runs the test suite on SQLite, MySQL 8.4, MariaDB 11.4 and
+  PostgreSQL 17. SQL Server is not tested.
 
 ```bash
 composer require medilies/rm-q
@@ -159,8 +163,8 @@ Deleting an `Image` stages its files, in the same transaction as the deletion.
 - **Raw values:** the values stored in the columns are staged; accessors and casts are ignored.
 - **Partial selects:** columns left out of a `select` are read from the database before the row is deleted.
 - **Invalid paths:** an invalid path makes `delete()` throw before the row is deleted.
-- **Not covered:** deletions that don't fire model events: `deleteQuietly()`, query builder deletes
-  (`Image::where(...)->delete()`) and database cascades.
+- **Not covered:** deletions that don't fire model events: `deleteQuietly()`, `forceDeleteQuietly()`, query
+  builder deletes (`Image::where(...)->delete()`) and database cascades.
 
 ## Deleting the files
 

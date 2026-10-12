@@ -188,6 +188,39 @@ it('checks the allowed directories again before deleting', function () {
         ->error->toContain('allowed_directories');
 });
 
+it('checks where directories really are when deleting', function () {
+    $allowed = $this->temporaryDirectory();
+    $outside = $this->temporaryDirectory();
+    file_put_contents($outside.DIRECTORY_SEPARATOR.'secret.txt', 'secret');
+    mkdir($allowed.DIRECTORY_SEPARATOR.'uploads');
+    config(['rm-q.allowed_directories' => [$allowed]]);
+
+    RmQ::stage($allowed.DIRECTORY_SEPARATOR.'uploads'.DIRECTORY_SEPARATOR.'secret.txt');
+
+    // The directory is swapped for a symlink between staging and deleting.
+    rmdir($allowed.DIRECTORY_SEPARATOR.'uploads');
+    symlink($outside, $allowed.DIRECTORY_SEPARATOR.'uploads');
+
+    RmQ::delete();
+
+    expect($outside.DIRECTORY_SEPARATOR.'secret.txt')->toBeFile()
+        ->and(RmqFile::query()->sole())
+        ->status->toBe(Status::Failed)
+        ->error->toContain('allowed_directories');
+})->skipOnWindows();
+
+it('records the outcomes before a listener can throw', function () {
+    brokenDisk('Access Denied');
+    Event::listen(FileDeletionFailed::class, fn () => throw new RuntimeException('The listener is down'));
+    RmQ::stage('file.txt', 'broken');
+
+    expect(fn () => RmQ::delete())->toThrow(RuntimeException::class, 'The listener is down');
+
+    expect(RmqFile::query()->sole())
+        ->status->toBe(Status::Failed)
+        ->error->toBe('Access Denied');
+});
+
 it('reports failures through events and the log', function () {
     Event::fake([FileDeletionFailed::class, StagedFilesProcessed::class]);
     Log::spy();

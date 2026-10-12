@@ -11,7 +11,7 @@ use Medilies\RmQ\Support\Paths;
  * Stages the model's files for deletion when the model is deleted, or force-deleted if it uses SoftDeletes.
  *
  * The raw column values are staged: accessors and casts are ignored. Deletions that don't fire model events are
- * not covered: deleteQuietly(), query builder deletes and database cascades.
+ * not covered: deleteQuietly(), forceDeleteQuietly(), query builder deletes and database cascades.
  *
  * @mixin Model
  */

@@ -4,6 +4,7 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\FilesystemOperator;
 use League\Flysystem\Local\LocalFilesystemAdapter;
@@ -48,4 +49,28 @@ function stagedRow(string $path, array $attributes = []): RmqFile
     ]);
 
     return RmqFile::query()->findOrFail($id);
+}
+
+/**
+ * Makes the next $times claim statements of a sweep fail with the given error, before they reach the database.
+ *
+ * @return object{count: int} How many claims failed so far.
+ */
+function failClaims(int $times, string $error): object
+{
+    $failures = new class
+    {
+        public int $count = 0;
+    };
+
+    DB::connection()->beforeExecuting(function (string $query) use ($failures, $times, $error) {
+        // The claim is the only statement that increments the attempts.
+        if (preg_match('/^update\b.*attempts\W*\s*\+\s*1/i', $query) === 1 && $failures->count < $times) {
+            $failures->count++;
+
+            throw new RuntimeException($error);
+        }
+    });
+
+    return $failures;
 }

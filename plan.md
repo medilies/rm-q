@@ -769,3 +769,51 @@ MariaDB and Postgres run only in CI: there is no `pdo_pgsql` locally. Postgres w
   `rowid`, MySQL/MariaDB `LIMIT`, SQL Server `TOP`.
 - **`rm-q:stats --json` shape:** `statuses` (label ⇒ count), `total`, `oldest_staged_at` (ISO-8601 or null),
   `deletable_now` (abandoned/staged/retries) and `failed_gave_up`.
+
+### Hardening after the first CI run (2026-10-12)
+
+**First CI run** (run 38313298735, `4226e09`): 22 of 23 jobs passed. That includes Postgres on L12 and L13, MariaDB
+on L12, PHP 8.2 and 8.5 at both lowest and stable dependencies, and Windows.
+
+The failure: on MariaDB with L13, one of the four concurrent `rm-q:delete` workers exited non-zero. Its error went
+to stdout, which the test didn't print. It didn't reproduce locally with the exact same versions (MariaDB
+11.4.13, L13.35.0): 12 normal runs and 15 stress runs (8 workers, chunks of 20 and 5) all passed.
+
+The most likely cause is an InnoDB deadlock between concurrent claim and status UPDATEs. Concurrent queue
+workloads on InnoDB deadlock this way because the UPDATEs lock rows through different indexes and through gap
+locks. Postgres doesn't take gap locks.
+
+**Fixes:**
+
+- **Retries on concurrency errors.** Each sweep statement is retried (5 tries, jittered backoff) when Laravel's
+  `ConcurrencyErrorDetector` recognises the error: deadlocks, lock wait timeouts, SQLite busy, MariaDB's "Record
+  has changed since last read", Galera conflicts. Sweeps never run inside a transaction, so retrying a single
+  statement is safe.
+- **Better test diagnostics.** The concurrency test now prints each worker's stdout when it fails.
+- **Symlink bypass fixed.** `allowed_directories` compares the resolved location of the parent directory (and of
+  the allowed directories), at stage time and at delete time. Previously a symlinked directory could escape the
+  allowlist; a probe test confirmed an outside file got deleted.
+- **Outcomes recorded before events.** Results are written before `FileDeletionFailed` events are dispatched.
+  Previously a throwing listener left the chunk in `Processing` until `claim_timeout`.
+- **Accurate dependencies.** `composer.json` now requires `laravel/framework`: the code uses Foundation helpers
+  (`app()`, `report()`, `config_path()`, `database_path()`) that no `illuminate/*` component provides.
+- **README:** lists the supported and tested databases, and adds `forceDeleteQuietly()` to the bypasses.
+
+Each fix has regression tests. 6 of the 7 new tests fail on the previous code; the 7th checks that only
+concurrency errors are retried.
+
+**Coverage:** 99.2% lines across 133 tests, measured with pcov in a PHP 8.4 container. The only lines left
+uncovered are a defensive branch in `rm-q:stats` and the provider's "not running in console" early returns.
+
+- CI has a new `coverage` job that fails below 95% and uploads the Clover and HTML reports as an artifact.
+- `composer test-coverage` applies the same floor locally.
+
+**Verification after the fixes:**
+
+| Combination (local) | Tests | PHPStan |
+|---|---|---|
+| PHP 8.4, L13.35, SQLite | 133 ✓ | ✓ |
+| PHP 8.4, L13.35, MariaDB 11.4.13, session tz `+05:00` | 133 ✓ | — |
+| PHP 8.4, L12.69, stable | 133 ✓ | ✓ |
+| PHP 8.3, L12.69 lowest | 133 ✓ | ✓ |
+| PHP 8.3, L13.30 lowest | 133 ✓ | ✓ |

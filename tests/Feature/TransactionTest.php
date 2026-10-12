@@ -96,6 +96,21 @@ it('defers delete() until the outermost commit', function () {
         ->and(RmqFile::query()->sole()->status)->toBe(Status::Deleted);
 });
 
+it('sweeps once when delete() is deferred twice', function () {
+    $file = $this->temporaryFile();
+
+    RmQ::transaction(function () use ($file) {
+        RmQ::stage($file);
+        RmQ::delete();
+        RmQ::delete();
+    });
+
+    expect($file)->not->toBeFile()
+        ->and(RmqFile::query()->sole())
+        ->status->toBe(Status::Deleted)
+        ->attempts->toBe(1);
+});
+
 it('drops a deferred delete() when the transaction rolls back', function () {
     [$before, $inside] = $this->temporaryFiles(2);
     RmQ::stage($before);

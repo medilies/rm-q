@@ -37,7 +37,7 @@ it('processes each row exactly once with concurrent sweeps', function () {
     $deletedPerWorker = [];
 
     foreach ($results->collect() as $name => $result) {
-        expect($result->successful())->toBeTrue("{$name}: {$result->errorOutput()}");
+        expect($result->successful())->toBeTrue("{$name}: {$result->output()}{$result->errorOutput()}");
 
         expect(preg_match('/\|\s*Deleted\s*\|\s*(\d+)\s*\|/', $result->output(), $matches))->toBe(1, $result->output())
             ->and($result->output())->toMatch('/\|\s*Failed, will retry\s*\|\s*0\s*\|/')

@@ -79,11 +79,11 @@ it('stages the files of force deleted models', function (bool $trashedFirst) {
 })->with(['live' => false, 'trashed' => true]);
 
 it('does not see deletions that skip model events', function () {
-    $file = $this->temporaryFile();
+    Picture::query()->create(['path' => $this->temporaryFile()])->deleteQuietly();
+    SoftPicture::query()->create(['path' => $this->temporaryFile()])->forceDeleteQuietly();
 
-    Picture::query()->create(['path' => $file])->deleteQuietly();
-
-    expect(RmqFile::query()->count())->toBe(0);
+    expect(RmqFile::query()->count())->toBe(0)
+        ->and(SoftPicture::withTrashed()->count())->toBe(0);
 });
 
 it('stages raw column values on their disks', function () {

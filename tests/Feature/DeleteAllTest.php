@@ -4,6 +4,7 @@ use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use Medilies\RmQ\DeletionReport;
 use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Events\StagedFilesProcessed;
@@ -72,6 +73,10 @@ it('rejects invalid config and arguments', function (array $config, array $argum
     'negative after' => [[], ['after' => -1], '[after]'],
     'limit' => [[], ['limit' => 0], '[limit]'],
 ]);
+
+it('rejects a negative grace period when counting', function () {
+    expect(fn () => RmQ::countDeletable(-1))->toThrow(RmqException::class, '[after]');
+});
 
 it('refuses to run inside a transaction', function () {
     expect(fn () => RmQ::transaction(fn () => RmQ::deleteAll()))
@@ -169,6 +174,67 @@ it('never overwrites a row another sweep took over', function () {
     expect(RmqFile::query()->sole())
         ->status->toBe(Status::Processing)
         ->claimed_by->toBe($takeover);
+});
+
+it('retries a statement that lost a deadlock', function () {
+    Sleep::fake();
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+    $failures = failClaims(2, 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction');
+
+    expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
+        ->and($failures->count)->toBe(2)
+        ->and($file)->not->toBeFile();
+
+    Sleep::assertSleptTimes(2);
+});
+
+it('gives up on a statement that keeps losing lock races', function () {
+    Sleep::fake();
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+    $failures = failClaims(PHP_INT_MAX, 'SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction');
+
+    expect(fn () => RmQ::deleteAll(after: 0))->toThrow(RuntimeException::class, 'Lock wait timeout exceeded');
+
+    expect($failures->count)->toBe(5)
+        ->and($file)->toBeFile()
+        ->and(RmqFile::query()->sole()->status)->toBe(Status::Staged);
+});
+
+it('does not retry other errors', function () {
+    Sleep::fake();
+    RmQ::stage($this->temporaryFile());
+    $failures = failClaims(PHP_INT_MAX, 'SQLSTATE[42S02]: Base table or view not found');
+
+    expect(fn () => RmQ::deleteAll(after: 0))->toThrow(RuntimeException::class, 'Base table or view not found');
+
+    expect($failures->count)->toBe(1);
+
+    Sleep::assertNeverSlept();
+});
+
+it('skips the rows another sweep claimed first', function () {
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+    $winner = (string) new Ulid;
+
+    // Another sweep claims the row between this sweep's select and its claim.
+    DB::connection()->beforeExecuting(function (string $query) use ($winner) {
+        if (preg_match('/^update\b.*attempts\W*\s*\+\s*1/i', $query) === 1) {
+            DB::connection()->table(RmqFile::tableName())->update([
+                'status' => Status::Processing->value,
+                'claimed_by' => $winner,
+                'claimed_at' => now(),
+            ]);
+        }
+    });
+
+    $report = RmQ::deleteAll(after: 0);
+
+    expect($report->processed())->toBe(0)
+        ->and($file)->toBeFile()
+        ->and(RmqFile::query()->sole()->claimed_by)->toBe($winner);
 });
 
 it('works through large backlogs in bounded statements', function () {

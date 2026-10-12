@@ -153,3 +153,34 @@ jobs:
           DB_USERNAME: ${{ matrix.username }}
           DB_PASSWORD: secret
           RM_Q_TEST_DB_TIMEZONE: "+05:00"
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    name: Coverage
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: dom, curl, libxml, mbstring, pdo, sqlite, pdo_sqlite, fileinfo
+          coverage: pcov
+
+      - name: Install dependencies
+        run: composer update --prefer-stable --prefer-dist --no-interaction
+
+      # Includes the integration tests; the child processes they start aren't measured.
+      - name: Execute tests with coverage
+        run: vendor/bin/pest --ci --coverage --min=95 --coverage-clover build/coverage/clover.xml --coverage-html build/coverage/html
+
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/coverage

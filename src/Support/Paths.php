@@ -80,11 +80,16 @@ final class Paths
             return true;
         }
 
-        $path = self::comparable($path);
+        // unlink() follows symlinked directories, so compare where the parent directory really is. The file itself
+        // may be a symlink: unlink() only removes the link. A missing parent means there is nothing to delete, and
+        // the lexical path is sound because ".." segments are rejected before this check.
+        $parent = realpath(dirname($path));
+        $path = self::comparable(rtrim($parent === false ? dirname($path) : $parent, '/\\').'/'.basename($path));
 
         foreach ($directories as $directory) {
-            // Sound because ".." segments are rejected before this check.
-            if (str_starts_with($path, rtrim(self::comparable($directory), '/').'/')) {
+            $root = realpath($directory);
+
+            if (str_starts_with($path, rtrim(self::comparable($root === false ? $directory : $root), '/').'/')) {
                 return true;
             }
         }
