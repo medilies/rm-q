@@ -13,11 +13,6 @@ trait RmqStageOnDeleteTrait
 
             $files = [];
             foreach ($columns as $column) {
-                if (! is_string($column)) {
-                    // ? log or throw
-                    continue;
-                }
-
                 $path = $model->$column ?? null;
 
                 if (is_null($path)) {
@@ -31,5 +26,6 @@ trait RmqStageOnDeleteTrait
         });
     }
 
+    /** @return string[] */
     abstract public function listFilePathColumns(): array;
 }

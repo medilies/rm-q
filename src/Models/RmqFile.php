@@ -15,11 +15,11 @@ use Illuminate\Support\Carbon;
  * @property ?Carbon $processed_at
  * @property ?Carbon $deleted_at
  *
- * @method static Builder|static whereStaged()
- * @method static Builder|static whereDeleted()
- * @method static Builder|static whereFailed()
- * @method static Builder|static whereInstance(?string $instance)
- * @method static Builder|static whereBeforeSeconds(int $beforeSeconds)
+ * @method static Builder<static> whereStaged()
+ * @method static Builder<static> whereDeleted()
+ * @method static Builder<static> whereFailed()
+ * @method static Builder<static> whereInstance(?string $instance)
+ * @method static Builder<static> whereBeforeSeconds(int $beforeSeconds)
  */
 final class RmqFile extends Model
 {
@@ -39,7 +39,7 @@ final class RmqFile extends Model
     /**
      * The attributes that aren't mass assignable.
      *
-     * @var array<string>|bool
+     * @var array<string>
      */
     protected $guarded = ['id'];
 

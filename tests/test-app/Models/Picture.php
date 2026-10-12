@@ -11,6 +11,7 @@ class Picture extends Model
 
     protected $guarded = [];
 
+    /** @return string[] */
     public function listFilePathColumns(): array
     {
         return ['path'];

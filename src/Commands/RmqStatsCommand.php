@@ -3,8 +3,7 @@
 namespace Medilies\RmQ\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
-use Medilies\RmQ\Facades\RmqException;
+use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Models\RmqFile;
 
 class RmqStatsCommand extends Command
@@ -15,15 +14,20 @@ class RmqStatsCommand extends Command
 
     public function handle(): int
     {
-        /** @var array<array{Status: string, Count: int}> */
-        $rows = RmqFile::select('status', DB::raw('COUNT(*) as count')) // @phpstan-ignore-line
+        $counts = RmqFile::query()->toBase()
+            ->select('status')
+            ->selectRaw('COUNT(*) as aggregate')
             ->groupBy('status')
-            ->get()
-            ->map(fn (RmqFile $row) => [
-                'Status' => $this->getStatusLabel($row->status),
-                'Count' => $row->count, // @phpstan-ignore-line
-            ])
-            ->toArray();
+            ->get();
+
+        $rows = [];
+
+        foreach ($counts as $count) {
+            $rows[] = [
+                'Status' => $this->getStatusLabel($this->toInt($count->status)),
+                'Count' => $this->toInt($count->aggregate),
+            ];
+        }
 
         $this->table(['Status', 'Count'], [
             ...$rows,
@@ -44,5 +48,10 @@ class RmqStatsCommand extends Command
             RmqFile::FAILED => 'Failed',
             default => throw new RmqException("Unhandled status '{$status}'"),
         };
+    }
+
+    private function toInt(mixed $value): int
+    {
+        return is_numeric($value) ? (int) $value : throw new RmqException('Expected a numeric value from the database');
     }
 }

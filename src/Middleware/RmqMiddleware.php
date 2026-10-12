@@ -13,6 +13,7 @@ class RmqMiddleware
 {
     public function __construct(private RmQ $rmq) {}
 
+    /** @param  Closure(Request): Response  $next */
     public function handle(Request $request, Closure $next): Response
     {
         $this->rmq->usingMiddleware();

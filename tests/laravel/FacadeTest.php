@@ -2,8 +2,8 @@
 
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
-use Medilies\RmQ\Facades\RmqException;
 use Medilies\RmQ\Models\RmqFile;
 use Tests\OrchestraTestCase;
 

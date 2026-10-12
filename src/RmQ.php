@@ -55,7 +55,7 @@ class RmQ
         return $this;
     }
 
-    /** @param  string[]|string  $paths */
+    /** @param  array<mixed>|string  $paths */
     public function stage(array|string $paths): void
     {
         // TODO: take query builder with one selected column => force stageInDb
@@ -66,7 +66,7 @@ class RmQ
             $this->stageInDb($paths);
     }
 
-    /** @param  string[]|string  $paths */
+    /** @param  array<mixed>|string  $paths */
     private function stageInTransactionStorage(array|string $paths): void
     {
         if (is_string($paths)) {
@@ -75,24 +75,15 @@ class RmQ
             return;
         }
 
-        /** @var string[] */
-        $newPaths = collect($paths)
-            ->filter(fn (mixed $path) => is_string($path))
-            ->toArray();
-
-        $this->transactionStorage = array_merge($this->transactionStorage, $newPaths);
+        $this->transactionStorage = array_merge($this->transactionStorage, array_values(array_filter($paths, 'is_string')));
     }
 
-    /** @param  string[]|string  $paths */
+    /** @param  array<mixed>|string  $paths */
     private function stageInDb(array|string $paths): void
     {
-        $data = match (true) {
-            is_string($paths) => $this->pathToStagedRecord($paths),
-            is_array($paths) => collect($paths)
-                ->filter(fn (mixed $path) => is_string($path))
-                ->map(fn (string $path) => $this->pathToStagedRecord($path))
-                ->toArray(),
-        };
+        $data = is_string($paths)
+            ? $this->pathToStagedRecord($paths)
+            : array_map($this->pathToStagedRecord(...), array_values(array_filter($paths, 'is_string')));
 
         RmqFile::insert($data);
 

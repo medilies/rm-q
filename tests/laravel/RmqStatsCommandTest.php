@@ -13,7 +13,7 @@ test($signature, function () use ($signature) {
     $filesCount = count($files);
 
     RmQ::stage($files);
-    Rmq::delete();
+    RmQ::delete();
 
     $this->assertDatabaseCount(RmqFile::tableName(), $filesCount)
         ->assertDatabaseHas(RmqFile::tableName(), [

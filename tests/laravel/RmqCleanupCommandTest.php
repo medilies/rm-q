@@ -12,7 +12,7 @@ test($signature, function () use ($signature) {
     $files = populateFiles();
 
     RmQ::stage($files[0]);
-    Rmq::delete();
+    RmQ::delete();
 
     $this->assertDatabaseHas(RmqFile::tableName(), [
         'path' => $files[0],

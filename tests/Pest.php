@@ -1,6 +1,6 @@
 <?php
 
-use Medilies\RmQ\Facades\RmqException;
+use Medilies\RmQ\Exceptions\RmqException;
 use Tests\OrchestraTestCase;
 
 uses(OrchestraTestCase::class)->in(__DIR__.'/laravel');

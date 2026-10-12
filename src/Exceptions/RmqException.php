@@ -1,6 +1,6 @@
 <?php
 
-namespace Medilies\RmQ\Facades;
+namespace Medilies\RmQ\Exceptions;
 
 use Exception;
 
