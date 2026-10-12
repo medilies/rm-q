@@ -10,8 +10,8 @@ return [
     'table' => 'rm_q_files',
 
     /*
-     * Grace period, in seconds, before `rm-q:delete` / RmQ::deleteAll() touches a staged file.
-     * Keep it longer than your longest request or job. Default: 1 day.
+     * Grace period, in seconds, before `rm-q:delete` / RmQ::deleteAll() deletes a staged file: time to notice a bug
+     * or restore a database backup before the files are gone. Default: 1 day.
      */
     'after' => env('RM_Q_AFTER', 60 * 60 * 24),
 

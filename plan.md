@@ -514,24 +514,51 @@ Schedule::command('rm-q:cleanup')->daily()->onOneServer();
 
 ### Phase 4 — Docs & release
 
-- [ ] Rewrite the README:
-  - Quick start with disks (`RmQ::stage($image->path, 'public')`), and how it works (stage → commit → sweep →
-    record).
-  - Guarantees and caveats:
-    - The same connection is required.
-    - `deleteQuietly()`, query-builder deletes and DB cascades bypass the trait.
-    - Only stage files that the record owns exclusively.
-    - A deterministic path can be reused before the sweep.
-    - Never stage user input.
-    - The middleware and `delete()` skip the grace period (rely on cron alone for critical files).
-    - Per-tenant disks need per-tenant runs.
-    - Versioned S3 buckets keep old versions.
-  - The scheduling snippet, and the config / commands / events reference.
-  - "One INSERT per `stage()` call — pass arrays to batch."
-- [ ] `CHANGELOG.md` v1.0.0, `SECURITY.md`, `.gitattributes` export-ignore `concept-meme.webp`,
-  `chmod 644 src/RmQ.php`.
-- [ ] Release, only with a go-ahead (it's outward-facing): tag `v1.0.0`, GitHub release, Packagist submission and
-  hook, un-comment the downloads badge.
+- [x] Rewrite the README:
+  - The problem and the solution (`RmQ::stage($image->path, 'public')`), installation and scheduling, and how it
+    works (stage → commit or roll back → delete → record).
+  - Staging, transactions, the model trait, the middlewares, monitoring, and references for the commands, config
+    and statuses.
+  - "Things to know": the same connection is required, which deletions bypass the trait, shared files, reused
+    paths, user input, multi-tenancy, versioned S3 buckets, large batches, tests.
+- [x] `SECURITY.md`, an updated `CONTRIBUTING.md` (integration tests, database env vars), `.gitattributes`
+  export-ignore `concept-meme.webp`, `src/RmQ.php` mode 644.
+- [x] `CHANGELOG.md` stays as the `update-changelog` workflow expects. The v1.0.0 notes are drafted below for the
+  GitHub release, and the workflow writes them into the changelog when the release is published.
+- [ ] Release, only with a go-ahead (it's outward-facing), following the checklist below.
+
+#### Release checklist
+
+1. Push `production-readiness` and open a PR. Wait for every CI job to pass: the PHP 8.2–8.5 × L12/L13 matrix,
+   Windows, the SQLite/MySQL/MariaDB/Postgres `databases` jobs, and PHPStan.
+2. Merge into `main`.
+3. Publish a GitHub release `v1.0.0` (tag `v1.0.0` on `main`) with the notes below. The `update-changelog` workflow
+   commits them to `CHANGELOG.md`.
+4. Submit the package on Packagist (<https://packagist.org/packages/submit>) and enable its GitHub hook.
+5. Un-comment the downloads badge in the README.
+
+#### Draft release notes: v1.0.0
+
+```markdown
+First stable release.
+
+- Staging is a database insert inside your transaction: a rollback, including of nested transactions and
+  savepoints, keeps the files.
+- Storage disks: `RmQ::stage($paths, 's3')`. Paths are validated when staged and again before deleting.
+- Safe deletion runs: rows are claimed atomically, so concurrent `rm-q:delete` runs never process the same row.
+  Failed deletions are retried, and rows left by crashed runs are taken back.
+- `RmqStageOnDeleteTrait`: keeps the files of soft-deleted models until `forceDelete()`, maps columns to disks, and
+  handles partial selects.
+- The `rm-q` HTTP middleware deletes the request's files after the response is sent. The new `DeleteStagedFiles`
+  middleware does the same for queued jobs.
+- Commands: `rm-q:delete` (`--after`, `--limit`, `--dry-run`, `--isolated`), `rm-q:cleanup` (retention),
+  `rm-q:stats` (`--json`), and the new `rm-q:retry`.
+- Events: `FileDeletionFailed`, `StagedFilesProcessed`.
+- Requires PHP 8.2+ and Laravel 12 or 13.
+
+Upgrading from `dev-main`: the schema and the API changed. Drop the old `rmq_files` table and publish the migration
+again. The middleware's in-memory mode, `RmQ::usingMiddleware()` and `RmQ::getStorage()` are gone.
+```
 
 ## 5. Verification
 
