@@ -67,3 +67,89 @@ jobs:
 
       - name: Execute tests
         run: vendor/bin/pest --ci --exclude-group=integration
+
+  databases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        laravel: ["12.*", "13.*"]
+        database: [sqlite, mysql, mariadb, pgsql]
+        include:
+          - laravel: "12.*"
+            testbench: "10.*"
+          - laravel: "13.*"
+            testbench: "11.*"
+          - database: mysql
+            port: 3306
+            username: root
+          - database: mariadb
+            port: 3307
+            username: root
+          - database: pgsql
+            port: 5432
+            username: postgres
+
+    name: DB ${{ matrix.database }} - L${{ matrix.laravel }}
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: rm_q_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -psecret" --health-interval=5s --health-timeout=5s --health-retries=20
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: secret
+          MARIADB_DATABASE: rm_q_test
+        ports:
+          - 3307:3306
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: rm_q_test
+        ports:
+          - 5432:5432
+        options: --health-cmd=pg_isready --health-interval=5s --health-timeout=5s --health-retries=20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: dom, curl, libxml, mbstring, pdo, sqlite, pdo_sqlite, pdo_mysql, pdo_pgsql, fileinfo
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
+          composer update --prefer-stable --prefer-dist --no-interaction
+
+      # SQLite: Feature tests run in memory, Integration tests on a file (see tests/IntegrationTestCase.php).
+      - name: Execute tests (SQLite)
+        if: matrix.database == 'sqlite'
+        run: vendor/bin/pest --ci
+
+      # The session timezone is skewed on purpose (Postgres reads "+05:00" POSIX-style, as UTC-5): grace periods
+      # must not depend on it.
+      - name: Execute tests (${{ matrix.database }})
+        if: matrix.database != 'sqlite'
+        run: vendor/bin/pest --ci
+        env:
+          DB_CONNECTION: ${{ matrix.database }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ matrix.port }}
+          DB_DATABASE: rm_q_test
+          DB_USERNAME: ${{ matrix.username }}
+          DB_PASSWORD: secret
+          RM_Q_TEST_DB_TIMEZONE: "+05:00"

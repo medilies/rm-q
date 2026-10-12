@@ -9,3 +9,6 @@ parameters:
     tmpDir: build/phpstan
     checkOctaneCompatibility: true
     checkModelProperties: true
+    # The package's own config may call env().
+    configDirectories:
+        - %currentWorkingDirectory%/config

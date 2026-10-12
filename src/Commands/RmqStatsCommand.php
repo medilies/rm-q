@@ -3,6 +3,7 @@
 namespace Medilies\RmQ\Commands;
 
 use Illuminate\Console\Command;
+use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Models\RmqFile;
 
@@ -42,12 +43,7 @@ class RmqStatsCommand extends Command
 
     private function getStatusLabel(int $status): string
     {
-        return match ($status) {
-            RmqFile::STAGED => 'Staged',
-            RmqFile::DELETED => 'Deleted',
-            RmqFile::FAILED => 'Failed',
-            default => throw new RmqException("Unhandled status '{$status}'"),
-        };
+        return Status::tryFrom($status)?->label() ?? "Unknown ({$status})";
     }
 
     private function toInt(mixed $value): int

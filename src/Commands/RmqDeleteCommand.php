@@ -13,9 +13,9 @@ class RmqDeleteCommand extends Command
 
     public function handle(): int
     {
-        RmQ::deleteAll();
+        $report = RmQ::deleteAll();
 
-        $this->comment('Deleted staged files');
+        $this->comment("Deleted {$report->deleted} staged file(s), {$report->failed} failed.");
 
         return self::SUCCESS;
     }

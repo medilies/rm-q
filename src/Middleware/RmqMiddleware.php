@@ -4,28 +4,26 @@ namespace Medilies\RmQ\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 use Medilies\RmQ\RmQ;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
-class RmqMiddleware
+/** Deletes the files staged during the request, after the response is sent. Alias: `rm-q`. */
+final class RmqMiddleware
 {
-    public function __construct(private RmQ $rmq) {}
-
     /** @param  Closure(Request): Response  $next */
     public function handle(Request $request, Closure $next): Response
     {
-        $this->rmq->usingMiddleware();
+        return $next($request);
+    }
 
-        $response = $next($request);
-
+    /** Also runs when the controller threw: only committed staging rows are swept. */
+    public function terminate(Request $request, Response $response): void
+    {
         try {
-            $this->rmq->delete();
-        } catch (Throwable $th) {
-            Log::error('Failed while deleting the following files ['.implode(', ', $this->rmq->getStorage()).'] with error: '.$th->getMessage());
+            app(RmQ::class)->delete();
+        } catch (Throwable $e) {
+            report($e); // The HTTP kernel doesn't guard terminate().
         }
-
-        return $response;
     }
 }

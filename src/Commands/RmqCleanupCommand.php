@@ -3,6 +3,7 @@
 namespace Medilies\RmQ\Commands;
 
 use Illuminate\Console\Command;
+use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Models\RmqFile;
 
 class RmqCleanupCommand extends Command
@@ -16,7 +17,7 @@ class RmqCleanupCommand extends Command
 
     public function handle(): int
     {
-        RmqFile::whereDeleted()->delete();
+        RmqFile::query()->where('status', Status::Deleted->value)->delete();
 
         $this->comment('Table cleaned up.');
 
