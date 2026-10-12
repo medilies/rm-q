@@ -2,33 +2,26 @@
 
 namespace Medilies\RmQ\Models;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Medilies\RmQ\Enums\Status;
+use Medilies\RmQ\Support\Settings;
 
 /**
  * @property int $id
  * @property string $path
- * @property int $status
- * @property ?string $instance
- * @property ?Carbon $staged_at
+ * @property ?string $disk
+ * @property Status $status
+ * @property string $instance
+ * @property Carbon $staged_at
+ * @property int $attempts
+ * @property ?string $claimed_by
+ * @property ?Carbon $claimed_at
  * @property ?Carbon $processed_at
- * @property ?Carbon $deleted_at
- *
- * @method static Builder|static whereStaged()
- * @method static Builder|static whereDeleted()
- * @method static Builder|static whereFailed()
- * @method static Builder|static whereInstance(?string $instance)
- * @method static Builder|static whereBeforeSeconds(int $beforeSeconds)
+ * @property ?string $error
  */
 final class RmqFile extends Model
 {
-    public const STAGED = 0;
-
-    public const DELETED = 1;
-
-    public const FAILED = 2;
-
     /**
      * Indicates if the model should be timestamped.
      *
@@ -39,50 +32,34 @@ final class RmqFile extends Model
     /**
      * The attributes that aren't mass assignable.
      *
-     * @var array<string>|bool
+     * @var array<string>
      */
     protected $guarded = ['id'];
 
     public static function tableName(): string
     {
-        return (new self)->getTable();
+        return Settings::table();
     }
 
-    /** @param Builder<static> $query */
-    public function scopeWhereStaged(Builder $query): void
+    public function getTable(): string
     {
-        $query->where('status', self::STAGED);
+        return Settings::table();
     }
 
-    /** @param Builder<static> $query */
-    public function scopeWhereDeleted(Builder $query): void
+    public function getConnectionName(): ?string
     {
-        $query->where('status', self::DELETED);
+        return Settings::connection();
     }
 
-    /** @param Builder<static> $query */
-    public function scopeWhereFailed(Builder $query): void
+    /** @return array<string, string> */
+    protected function casts(): array
     {
-        $query->where('status', self::FAILED);
-    }
-
-    /** @param Builder<static> $query */
-    public function scopeWhereInstance(Builder $query, ?string $instance): void
-    {
-        if (is_null($instance)) {
-            return;
-        }
-
-        $query->where('instance', $instance);
-    }
-
-    /** @param Builder<static> $query */
-    public function scopeWhereBeforeSeconds(Builder $query, int $beforeSeconds): void
-    {
-        if ($beforeSeconds <= 0) {
-            return;
-        }
-
-        $query->where('staged_at', '<=', Carbon::now()->subSeconds($beforeSeconds));
+        return [
+            'status' => Status::class,
+            'attempts' => 'integer',
+            'staged_at' => 'datetime',
+            'claimed_at' => 'datetime',
+            'processed_at' => 'datetime',
+        ];
     }
 }

@@ -4,6 +4,11 @@ parameters:
         - src
         - config
         - database
+        # Analyses RmqStageOnDeleteTrait through a model that uses it.
+        - tests/test-app
     tmpDir: build/phpstan
     checkOctaneCompatibility: true
     checkModelProperties: true
+    # The package's own config may call env().
+    configDirectories:
+        - %currentWorkingDirectory%/config

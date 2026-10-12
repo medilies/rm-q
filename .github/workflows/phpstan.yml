@@ -4,6 +4,13 @@ on:
   push:
     paths:
       - "**.php"
+      - "composer.json"
+      - "phpstan.neon.dist"
+      - ".github/workflows/phpstan.yml"
+  pull_request:
+    paths:
+      - "**.php"
+      - "composer.json"
       - "phpstan.neon.dist"
       - ".github/workflows/phpstan.yml"
 
@@ -18,11 +25,22 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.2"
+          php-version: "8.4"
           coverage: none
 
+      - name: Validate composer.json
+        run: composer validate --strict
+
       - name: Install composer dependencies
-        run: composer install --prefer-dist --no-progress --no-suggest --dev
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Check PSR-4 autoloading
+        run: composer dump-autoload --optimize --strict-psr
+
+      # Pushes are auto-fixed by fix-php-code-style-issues.yml; PRs only get the check.
+      - name: Check code style
+        if: github.event_name == 'pull_request'
+        run: vendor/bin/pint --test
 
       - name: Run PHPStan
-        run: ./vendor/bin/phpstan --error-format=github
+        run: vendor/bin/phpstan --error-format=github
