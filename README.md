@@ -226,6 +226,8 @@ when called inside a transaction on the rm-q connection, since that transaction'
   at that path before the deletion runs will be deleted.
 - **User input:** never stage paths that come from user input without validating them. Paths can't leave their disk
   through `..` segments, but on a local disk a symlinked directory is followed.
+- **Timezones:** `staged_at` is stored in UTC, so the grace period is elapsed time whatever `app.timezone` is.
+  Rows you insert yourself must use UTC too.
 - **Multi-tenancy:** disks are resolved when the files are deleted. With per-tenant disks, run `rm-q:delete` once
   per tenant.
 - **Versioned S3 buckets:** deleting an object only adds a delete marker. Use lifecycle rules to remove old

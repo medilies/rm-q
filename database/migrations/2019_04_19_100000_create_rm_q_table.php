@@ -23,7 +23,7 @@ return new class extends Migration
 
             $table->string('disk', 64);
 
-            /* Written by PHP: comparisons never depend on the database timezone. */
+            /* UTC, written by PHP: comparisons depend on neither the app nor the database timezone. */
             $table->dateTime('staged_at')->index();
 
             /* Counted before each deletion attempt. */

@@ -14,7 +14,7 @@ A configured filesystem disk the staged file lives on. Every staged file has one
 _Avoid_: Absolute path, local path
 
 **Grace period**:
-How long a staged file waits before it may be deleted.
+The elapsed time a staged file waits before it may be deleted, whatever the timezone.
 _Avoid_: Delay, TTL
 
 **Attempt**:

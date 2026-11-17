@@ -2,10 +2,11 @@
 
 namespace Medilies\RmQ\Models;
 
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
+use Medilies\RmQ\Casts\UtcDateTime;
 use Medilies\RmQ\Exceptions\RmqException;
 
 /**
@@ -14,7 +15,7 @@ use Medilies\RmQ\Exceptions\RmqException;
  * @property int $id
  * @property string $path
  * @property string $disk
- * @property Carbon $staged_at
+ * @property CarbonInterface $staged_at In the app timezone; stored in UTC.
  * @property int $attempts
  * @property ?string $error
  */
@@ -67,7 +68,7 @@ final class RmqFile extends Model
     {
         return [
             'attempts' => 'integer',
-            'staged_at' => 'datetime',
+            'staged_at' => UtcDateTime::class,
         ];
     }
 }

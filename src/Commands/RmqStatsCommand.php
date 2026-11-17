@@ -19,7 +19,9 @@ class RmqStatsCommand extends Command
         $pending = RmqFile::query()->where('attempts', '<', Config::integer('rm-q.max_attempts'));
 
         $oldestStaged = $pending->clone()->min('staged_at');
-        $oldestStaged = is_string($oldestStaged) ? Date::parse($oldestStaged) : null;
+        $oldestStaged = is_string($oldestStaged)
+            ? Date::parse($oldestStaged, 'UTC')->setTimezone(date_default_timezone_get())
+            : null;
 
         $stats = [
             'pending' => $pending->clone()->count(),

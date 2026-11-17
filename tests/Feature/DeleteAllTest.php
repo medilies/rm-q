@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
@@ -29,6 +30,38 @@ it('waits for the grace period', function () {
     expect($onTime->deleted)->toBe(1)
         ->and(Storage::path($file))->not->toBeFile()
         ->and(RmqFile::query()->count())->toBe(0);
+});
+
+it('keeps the grace period when app.timezone changes', function () {
+    config(['rm-q.after' => 86400]);
+    $this->freezeSecond();
+    RmQ::stage($this->temporaryFile());
+
+    date_default_timezone_set('Asia/Tokyo'); // e.g. app.timezone changed and the app redeployed
+    $this->travel(15)->hours();
+
+    expect(RmQ::countDeletable())->toBe(0)
+        ->and(RmqFile::query()->sole()->staged_at->equalTo(now()->subHours(15)))->toBeTrue();
+
+    $this->travel(9)->hours();
+
+    expect(RmQ::countDeletable())->toBe(1);
+});
+
+it('keeps the grace period across the hour repeated when DST ends', function () {
+    date_default_timezone_set('Europe/Paris');
+    config(['rm-q.after' => 3600]);
+    // 02:30 CET, the second 02:30 of 2026-10-25 in Paris.
+    $this->travelTo(Date::parse('2026-10-25 01:30:00', 'UTC'));
+    RmQ::stage($this->temporaryFile());
+
+    expect(RmQ::countDeletable())->toBe(0);
+
+    $this->travel(3599)->seconds();
+    expect(RmQ::countDeletable())->toBe(0);
+
+    $this->travel(1)->seconds();
+    expect(RmQ::countDeletable())->toBe(1);
 });
 
 it('takes the grace period as an argument', function () {

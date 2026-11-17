@@ -44,7 +44,8 @@ class RmQ
     {
         $disk = Paths::disk($disk);
         $paths = Paths::normalize($paths);
-        $now = Date::now();
+        // UTC: the grace period is elapsed time, whatever app.timezone is or was.
+        $now = Date::now('UTC');
 
         foreach (array_chunk($paths, self::INSERT_CHUNK) as $chunk) {
             RmqFile::query()->insert(array_map(fn (string $path): array => [
@@ -146,14 +147,14 @@ class RmQ
         return $this->deletable(RmqFile::query(), $this->cutoff($after), $this->setting('max_attempts', 1))->count();
     }
 
-    /** Files staged at or before the cutoff are past their grace period. */
+    /** Files staged at or before the cutoff, in UTC like `staged_at`, are past their grace period. */
     private function cutoff(?int $after): CarbonInterface
     {
         if ($after !== null && $after < 0) {
             throw RmqException::invalidArgument('after', 'an integer greater than or equal to 0');
         }
 
-        return Date::now()->subSeconds($after ?? GracePeriod::fromConfig()->seconds);
+        return Date::now('UTC')->subSeconds($after ?? GracePeriod::fromConfig()->seconds);
     }
 
     /**
