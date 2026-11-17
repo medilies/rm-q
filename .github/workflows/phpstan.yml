@@ -2,6 +2,7 @@ name: PHPStan
 
 on:
   push:
+    branches: [main]
     paths:
       - "**.php"
       - "composer.json"
@@ -37,9 +38,7 @@ jobs:
       - name: Check PSR-4 autoloading
         run: composer dump-autoload --optimize --strict-psr
 
-      # Pushes are auto-fixed by fix-php-code-style-issues.yml; PRs only get the check.
       - name: Check code style
-        if: github.event_name == 'pull_request'
         run: vendor/bin/pint --test
 
       - name: Run PHPStan

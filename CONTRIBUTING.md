@@ -38,3 +38,5 @@ vendor/bin/phpstan
 ```bash
 vendor/bin/pint
 ```
+
+CI fails on unformatted files.
