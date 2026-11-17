@@ -3,36 +3,35 @@
 namespace TestApp;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
-use Medilies\RmQ\Facades\RmqException;
+use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Middleware\RmqMiddleware;
-use Medilies\RmQ\RmQ;
+use RuntimeException;
 
 class TestServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        Route::post('test-middleware', function (Request $request, RmQ $rmQ) {
-            /** @var array */
-            $files = $request->validate([
-                'files' => 'array',
-                'files.*' => 'string',
-            ])['files'];
-
-            $rmQ->stage($files);
+        Route::post('stage', function (Request $request) {
+            RmQ::stage($request->collect('files')->all());
         })->middleware(RmqMiddleware::class);
 
-        Route::post('test-middleware-exception', function (Request $request, RmQ $rmQ) {
-            /** @var array */
-            $files = $request->validate([
-                'files' => 'array',
-                'files.*' => 'string',
-            ])['files'];
+        // Staged outside any transaction: nothing rolls the staging back.
+        Route::post('stage-then-throw', function (Request $request) {
+            RmQ::stage($request->collect('files')->all());
 
-            $rmQ->stage($files);
+            throw new RuntimeException('Failed after staging');
+        })->middleware('rm-q');
 
-            throw new RmqException;
-        })->middleware(RmqMiddleware::class);
+        // The original disaster: the outer transaction rolls back after a nested RmQ::transaction() committed.
+        Route::post('stage-in-rolled-back-transaction', function (Request $request) {
+            DB::transaction(function () use ($request) {
+                RmQ::transaction(fn () => RmQ::stage($request->collect('files')->all()));
+
+                throw new RuntimeException('Rolled back after staging');
+            });
+        })->middleware('rm-q');
     }
 }

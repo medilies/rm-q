@@ -3,43 +3,55 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use Medilies\RmQ\Models\RmqFile;
+use Medilies\RmQ\Support\Settings;
 
 return new class extends Migration
 {
+    /** The table must live on the connection your business transactions use. */
+    public function getConnection(): ?string
+    {
+        return Settings::connection();
+    }
+
     public function up(): void
     {
-        if (Schema::hasTable(RmqFile::tableName())) {
-            return;
-        }
-
-        Schema::create(RmqFile::tableName(), function (Blueprint $table) {
+        Schema::create(Settings::table(), function (Blueprint $table) {
             $table->id();
 
-            /* not unique */
-            $table->string('path');
+            /* Absolute local path, or path on `disk`. Not unique. */
+            $table->text('path');
 
+            /* Null: `path` is an absolute local path. */
+            $table->string('disk', 64)->nullable();
+
+            /* Medilies\RmQ\Enums\Status */
             $table->unsignedTinyInteger('status')->default(0)
-                ->comment(RmqFile::STAGED.': staged, '.RmqFile::DELETED.': deleted, '.RmqFile::FAILED.': failed');
+                ->comment('0: staged, 1: deleted, 2: failed, 3: processing');
 
-            // ? Failure message column
-            // ? retries
+            /* ULID of the request or job that staged the file. */
+            $table->ulid('instance');
 
-            /* ULID */
-            $table->string('instance', 36);
+            /* Written by PHP: comparisons never depend on the database timezone. */
+            $table->dateTime('staged_at');
 
-            $table->timestamp('staged_at')->useCurrent();
+            $table->unsignedSmallInteger('attempts')->default(0);
 
-            $table->timestamp('processed_at')->nullable();
+            /* ULID of the sweep processing the row. */
+            $table->ulid('claimed_by')->nullable();
 
-            $table->timestamp('deleted_at')->nullable();
+            $table->dateTime('claimed_at')->nullable();
 
-            // ? index status -> instance -> staged_at
+            $table->dateTime('processed_at')->nullable();
+
+            $table->text('error')->nullable();
+
+            $table->index(['status', 'staged_at']);
+            $table->index(['instance', 'status']);
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists(RmqFile::tableName());
+        Schema::dropIfExists(Settings::table());
     }
 };
