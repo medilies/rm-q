@@ -80,7 +80,7 @@ it('rejects a negative grace period when counting', function () {
 
 it('refuses to run inside a transaction', function () {
     expect(fn () => RmQ::transaction(fn () => RmQ::deleteAll()))
-        ->toThrow(RmqException::class, 'cannot run inside a database transaction');
+        ->toThrow(RmqException::class, 'cannot run inside a transaction on the rm-q connection');
 });
 
 it('stops at the limit', function () {

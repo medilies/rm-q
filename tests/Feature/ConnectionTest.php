@@ -50,6 +50,15 @@ it('cannot roll back with a transaction on another connection', function () {
     expect(DB::connection('rmq')->table((new RmqFile)->getTable())->count())->toBe(1);
 });
 
+it('runs deleteAll() while another connection has a transaction open', function () {
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+
+    $report = DB::connection()->transaction(fn () => RmQ::deleteAll(after: 0));
+
+    expect($report->deleted())->toBe(1);
+});
+
 it('deletes through the configured connection', function () {
     $file = $this->temporaryFile();
     RmQ::stage($file);

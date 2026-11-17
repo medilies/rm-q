@@ -445,9 +445,14 @@ class RmQ
         });
     }
 
-    /** Respects the wrapping transaction of RefreshDatabase. */
+    /** Whether a transaction is open on the rm-q connection, ignoring the wrapping transaction of RefreshDatabase. */
     private function transactionPending(): bool
     {
+        if ($this->connection()->transactionLevel() === 0) {
+            return false;
+        }
+
+        // The level counts RefreshDatabase's wrapping transaction, which takes no after-commit callbacks.
         $pending = true;
 
         $this->connection()->afterCommit(function () use (&$pending): void {
