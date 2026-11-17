@@ -40,3 +40,8 @@ vendor/bin/pint
 ```
 
 CI fails on unformatted files.
+
+## Releasing
+
+Publish a GitHub release on `main`, tagged and named `vX.Y.Z`, with the release notes as its body. The `update-changelog`
+workflow then writes the notes into `CHANGELOG.md`.
