@@ -36,7 +36,8 @@ final class RmqFile extends Model
 
     public function getTable(): string
     {
-        return Config::string('rm-q.table');
+        // The default covers apps booted without the package config, e.g. by Larastan.
+        return Config::string('rm-q.table', 'rm_q_files');
     }
 
     /** Must be the connection your business transactions run on. Null is the default connection. */
