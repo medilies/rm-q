@@ -212,8 +212,8 @@ when called inside a transaction on the rm-q connection, since that transaction'
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `connection` | `env('RM_Q_CONNECTION')` | Connection of the rm-q table: the one your transactions use. Null means the default connection. |
-| `table` | `rm_q_files` | Name of the rm-q table. |
+| `connection` | `env('RM_Q_CONNECTION')` | Connection of the rm-q table: the one your transactions use. Null means the default connection. Read by the migration: changing it after migrating needs a migration of your own. |
+| `table` | `rm_q_files` | Name of the rm-q table. Read by the migration: changing it after migrating needs a migration of your own. |
 | `after` | `env('RM_Q_AFTER')`, 1 day when unset | Grace period, in seconds, before `rm-q:delete` deletes a staged file. An invalid value logs a warning and uses 1 day. |
 | `chunk` | `500` | Rows read and processed per batch. |
 | `max_attempts` | `3` | Attempts before a failed deletion is given up. |
@@ -250,6 +250,12 @@ their own: a missing file there always counts as deleted.
   an empty directory that exists.
 - **Don't delete the directories of staged files yourself.** Their files would fail until they give up. Stage the
   files instead, or delete their rows: `RmqFile::query()->where('path', 'like', 'users/5/%')->delete()`.
+
+## Uninstalling
+
+Roll back or drop the rm-q table before `composer remove medilies/rm-q`. Rolling back the published migration later
+still works, but without the package's config it uses `rm_q_files` on the default connection: publish the config first
+if you set `RM_Q_CONNECTION`.
 
 ## Changelog
 

@@ -2,20 +2,27 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
-use Medilies\RmQ\Models\RmqFile;
 
+/*
+ * Reads the rm-q config, not the package's classes: published, this migration must keep working after the package
+ * is removed. Changing rm-q.connection or rm-q.table after migrating needs a migration of your own.
+ */
 return new class extends Migration
 {
     /** The table must live on the connection your business transactions use. */
     public function getConnection(): ?string
     {
-        return (new RmqFile)->getConnectionName();
+        /** @var string|null $connection */
+        $connection = Config::get('rm-q.connection');
+
+        return $connection;
     }
 
     public function up(): void
     {
-        Schema::create((new RmqFile)->getTable(), function (Blueprint $table) {
+        Schema::create($this->table(), function (Blueprint $table) {
             $table->id();
 
             /* Path on `disk`. Not unique. */
@@ -36,6 +43,11 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists((new RmqFile)->getTable());
+        Schema::dropIfExists($this->table());
+    }
+
+    private function table(): string
+    {
+        return Config::string('rm-q.table', 'rm_q_files');
     }
 };
