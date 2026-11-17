@@ -25,7 +25,8 @@ Add `RM_Q_TEST_DB_TIMEZONE=+05:00` to skew the database session timezone, as CI 
 composer test-coverage   # needs the pcov or Xdebug extension
 ```
 
-CI fails below 95% line coverage, and uploads the Clover and HTML reports as the `coverage-report` artifact.
+CI fails below 95% line coverage, and uploads the Clover and HTML reports as the `coverage-report` artifact. On
+`main`, it also force-pushes the percentage to the `badges` branch, which the README badge reads.
 
 ## Static analysis
 

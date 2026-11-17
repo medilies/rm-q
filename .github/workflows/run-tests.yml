@@ -158,6 +158,10 @@ jobs:
 
     name: Coverage
 
+    # Pushes the coverage badge to the `badges` branch.
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -182,3 +186,18 @@ jobs:
         with:
           name: coverage-report
           path: build/coverage
+
+      # The README badge reads this JSON through https://img.shields.io/endpoint. Force-pushed: one commit only.
+      - name: Publish the coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          percent=$(php -r '$m = simplexml_load_file("build/coverage/clover.xml")->project->metrics; echo floor(100 * (int) $m["coveredstatements"] / (int) $m["statements"]);')
+          mkdir build/badges && cd build/badges
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"brightgreen"}\n' "$percent" > coverage.json
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Update the coverage badge"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
