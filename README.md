@@ -5,9 +5,7 @@
 [![phpstan](https://img.shields.io/github/actions/workflow/status/medilies/rm-q/phpstan.yml?branch=main&label=phpstan&style=flat-square)](https://github.com/medilies/rm-q/actions?query=workflow%3A"phpstan"+branch%3Amain)
 <!-- [![Total Downloads](https://img.shields.io/packagist/dt/medilies/rm-q.svg?style=flat-square)](https://packagist.org/packages/medilies/rm-q) -->
 
-<div style="text-align: center;">
-  <img src="./concept-meme.webp" alt="concept meme" width="666px">
-</div>
+![Deleting files inside a transaction loses them on rollback; deleting them a day after the commit doesn't](./concept-meme.webp)
 
 A file deletion can't be rolled back. This Laravel package stages deletions in a database table, inside your
 transactions. A scheduled command deletes the files once a grace period is over, and retries the ones that fail.
