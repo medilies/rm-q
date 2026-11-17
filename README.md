@@ -244,7 +244,7 @@ See [Commands](#commands).
 | `after` | `env('RM_Q_AFTER', 86400)` | Grace period, in seconds, before `rm-q:delete` deletes a staged file. |
 | `chunk` | `500` | Rows claimed and processed per batch. |
 | `max_attempts` | `3` | Attempts before a failed deletion is given up. |
-| `claim_timeout` | `3600` | Seconds after which the rows of a crashed run are taken back. |
+| `claim_timeout` | `3600` | Seconds after which the rows of a crashed run are taken back. Keep it above the time one `chunk` takes. |
 | `cleanup_after_days` | `30` | How long `rm-q:cleanup` keeps processed rows, in days. |
 | `allowed_directories` | `null` | Absolute directories that local paths must be in. Null means no restriction. |
 

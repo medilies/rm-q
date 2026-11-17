@@ -70,6 +70,7 @@ it('rejects invalid config and arguments', function (array $config, array $argum
     'after config' => [['rm-q.after' => 'one day'], [], 'rm-q.after'],
     'negative after config' => [['rm-q.after' => -1], [], 'rm-q.after'],
     'chunk config' => [['rm-q.chunk' => 0], [], 'rm-q.chunk'],
+    'claim_timeout config' => [['rm-q.claim_timeout' => 0], [], 'rm-q.claim_timeout'],
     'negative after' => [[], ['after' => -1], '[after]'],
     'limit' => [[], ['limit' => 0], '[limit]'],
 ]);

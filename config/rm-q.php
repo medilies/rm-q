@@ -21,7 +21,7 @@ return [
     /* A failed deletion is retried by `rm-q:delete` until it reaches this many attempts. */
     'max_attempts' => 3,
 
-    /* Seconds after which a row claimed by a sweep that died is reclaimed. */
+    /* Seconds after which a row claimed by a sweep that died is reclaimed. Keep it above the time one chunk takes. */
     'claim_timeout' => 60 * 60,
 
     /* How long `rm-q:cleanup` keeps processed rows, in days. */

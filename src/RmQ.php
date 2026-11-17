@@ -206,7 +206,7 @@ class RmQ
     {
         return $query
             ->where('status', Status::Processing->value)
-            ->where('claimed_at', '<=', $now->copy()->subSeconds(Settings::int('claim_timeout')));
+            ->where('claimed_at', '<=', $now->copy()->subSeconds(Settings::int('claim_timeout', 1)));
     }
 
     /**
