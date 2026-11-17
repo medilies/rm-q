@@ -43,6 +43,20 @@ describe('rm-q:delete', function () {
             ->and(RmqFile::query()->sum('attempts'))->toEqual(1);
     });
 
+    it('reports what the limit lets a dry run process', function (string $limit, string $expected) {
+        RmQ::stage($this->temporaryFiles(3));
+
+        $this->artisan('rm-q:delete', ['--after' => '0', '--dry-run' => true, '--limit' => $limit])
+            ->expectsOutputToContain($expected)
+            ->assertSuccessful();
+
+        expect(RmqFile::query()->count())->toBe(3);
+    })->with([
+        'below the due count' => ['2', 'Would process 2 staged file(s) (3 due, limited by --limit).'],
+        'at the due count' => ['3', 'Would process 3 staged file(s).'],
+        'above the due count' => ['10', 'Would process 3 staged file(s).'],
+    ]);
+
     it('rejects invalid options', function (array $options, string $message) {
         $this->artisan('rm-q:delete', $options)
             ->expectsOutputToContain($message)

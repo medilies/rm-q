@@ -73,15 +73,17 @@ it('warns and succeeds when rm-q:delete runs while paused', function () {
     expect(RmqFile::query()->count())->toBe(1);
 });
 
-it('still counts on a dry run while paused', function () {
+it('reports nothing to process on a dry run while paused, with the due count', function (array $options) {
     config(['rm-q.paused' => true]);
     RmQ::stage($this->temporaryFile());
 
-    $this->artisan('rm-q:delete', ['--after' => '0', '--dry-run' => true])
-        ->expectsOutputToContain('rm-q is paused')
-        ->expectsOutputToContain('Would process 1 staged file(s).')
+    $this->artisan('rm-q:delete', ['--after' => '0', '--dry-run' => true, ...$options])
+        ->expectsOutputToContain('Would process 0 staged file(s) (1 due, rm-q is paused).')
         ->assertSuccessful();
-});
+})->with([
+    'no limit' => [[]],
+    'with a limit' => [['--limit' => '1']],
+]);
 
 it('shows the pause in the stats', function () {
     config(['rm-q.paused' => true]);

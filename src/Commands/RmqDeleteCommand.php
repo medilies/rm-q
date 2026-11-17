@@ -44,7 +44,7 @@ class RmqDeleteCommand extends Command implements Isolatable
         }
 
         if ($this->option('dry-run')) {
-            $this->components->info('Would process '.RmQ::countDeletable($after).' staged file(s).');
+            $this->components->info($this->dryRun($after, $limit, $paused));
 
             return self::SUCCESS;
         }
@@ -71,6 +71,22 @@ class RmqDeleteCommand extends Command implements Isolatable
         }
 
         return self::SUCCESS;
+    }
+
+    /** What this exact invocation would process, with the due count when the pause or the limit cuts it. */
+    private function dryRun(int $after, ?int $limit, bool $paused): string
+    {
+        $due = RmQ::countDeletable($after);
+
+        [$processed, $reason] = match (true) {
+            $paused => [0, 'rm-q is paused'],
+            $limit !== null && $limit < $due => [$limit, 'limited by --limit'],
+            default => [$due, null],
+        };
+
+        return $reason === null
+            ? "Would process {$processed} staged file(s)."
+            : "Would process {$processed} staged file(s) ({$due} due, {$reason}).";
     }
 
     /** @throws InvalidArgumentException */
