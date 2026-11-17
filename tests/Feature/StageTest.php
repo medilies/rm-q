@@ -2,12 +2,11 @@
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
-it('stages paths as rows of the current instance', function () {
+it('stages one row per path', function () {
     $files = $this->temporaryFiles(2);
 
     expect(RmQ::stage($files))->toBe(2);
@@ -19,11 +18,9 @@ it('stages paths as rows of the current instance', function () {
             fn ($row) => $row->path->toBe($files[1]),
         )
         ->each(fn ($row) => $row
-            ->status->toBe(Status::Staged)
-            ->instance->toBe(RmQ::instanceId())
             ->disk->toBeNull()
             ->attempts->toBe(0)
-            ->processed_at->toBeNull());
+            ->error->toBeNull());
 
     expect($files[0])->toBeFile()->and($files[1])->toBeFile();
 });
@@ -126,15 +123,15 @@ it('resolves allowed directories that are symlinks', function () {
         ->and(RmQ::stage($alias.DIRECTORY_SEPARATOR.'other.txt'))->toBe(1);
 })->skipOnWindows();
 
-it('validates its config', function (array $config, string $key) {
+it('validates its config', function (array $config, string $exception, string $key) {
     config($config);
 
-    expect(fn () => RmQ::stage($this->temporaryFile()))->toThrow(RmqException::class, $key);
+    expect(fn () => RmQ::stage($this->temporaryFile()))->toThrow($exception, $key);
 })->with([
-    'relative allowed directory' => [['rm-q.allowed_directories' => ['relative/dir']], 'rm-q.allowed_directories'],
-    'allowed directories not a list' => [['rm-q.allowed_directories' => '/tmp'], 'rm-q.allowed_directories'],
-    'connection not a name' => [['rm-q.connection' => ['mysql']], 'rm-q.connection'],
-    'empty table name' => [['rm-q.table' => ''], 'rm-q.table'],
+    'relative allowed directory' => [['rm-q.allowed_directories' => ['relative/dir']], RmqException::class, 'rm-q.allowed_directories'],
+    'allowed directories not a list' => [['rm-q.allowed_directories' => '/tmp'], RmqException::class, 'rm-q.allowed_directories'],
+    'connection not a name' => [['rm-q.connection' => ['mysql']], RmqException::class, 'rm-q.connection'],
+    'table not a string' => [['rm-q.table' => null], InvalidArgumentException::class, 'rm-q.table'],
 ]);
 
 it('stores the staging time from PHP, not from the database clock', function () {

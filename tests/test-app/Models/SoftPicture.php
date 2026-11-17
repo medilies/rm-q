@@ -4,18 +4,18 @@ namespace TestApp\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Medilies\RmQ\Models\RmqStageOnDeleteTrait;
+use Medilies\RmQ\Concerns\StagesFilesOnDelete;
 
 class SoftPicture extends Model
 {
-    use RmqStageOnDeleteTrait;
     use SoftDeletes;
+    use StagesFilesOnDelete;
 
     protected $guarded = [];
 
-    /** @return array<int|string, ?string> */
-    public function listFilePathColumns(): array
+    /** @return array<string, ?string> */
+    public function rmqFileColumns(): array
     {
-        return ['path'];
+        return ['path' => null];
     }
 }

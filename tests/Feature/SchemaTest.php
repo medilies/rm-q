@@ -5,10 +5,10 @@ use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
-it('indexes the columns the sweeps filter on', function () {
+it('indexes the grace period column', function () {
     $indexes = collect(Schema::getIndexes((new RmqFile)->getTable()))->pluck('columns')->all();
 
-    expect($indexes)->toContain(['status', 'staged_at'], ['instance', 'status']);
+    expect($indexes)->toContain(['staged_at']);
 });
 
 it('stores long paths', function () {

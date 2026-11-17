@@ -22,7 +22,7 @@ beforeEach(function () {
     });
 });
 
-it('deletes the files once the transaction commits', function () {
+it('deletes the files once the transaction commits and the grace period is over', function () {
     $images = $this->images;
 
     DB::transaction(function () use ($images) {
@@ -32,7 +32,12 @@ it('deletes the files once the transaction commits', function () {
         }
     });
 
-    RmQ::delete();
+    $this->artisan('rm-q:delete')->assertSuccessful();
+
+    Storage::disk('public')->assertExists(['images/1.jpg', 'images/2.jpg']);
+
+    $this->travel(1)->days();
+    $this->artisan('rm-q:delete')->assertSuccessful();
 
     Storage::disk('public')->assertMissing(['images/1.jpg', 'images/2.jpg']);
 });
@@ -51,7 +56,8 @@ it('keeps every file when the transaction fails midway', function () {
         }
     }))->toThrow(RuntimeException::class);
 
-    RmQ::delete();
+    $this->travel(1)->days();
+    $this->artisan('rm-q:delete')->assertSuccessful();
 
     Storage::disk('public')->assertExists(['images/1.jpg', 'images/2.jpg']);
 

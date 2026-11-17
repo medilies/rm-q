@@ -3,17 +3,17 @@
 namespace TestApp\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Medilies\RmQ\Models\RmqStageOnDeleteTrait;
+use Medilies\RmQ\Concerns\StagesFilesOnDelete;
 
 class Picture extends Model
 {
-    use RmqStageOnDeleteTrait;
+    use StagesFilesOnDelete;
 
     protected $guarded = [];
 
-    /** @return array<int|string, ?string> */
-    public function listFilePathColumns(): array
+    /** @return array<string, ?string> */
+    public function rmqFileColumns(): array
     {
-        return ['path'];
+        return ['path' => null];
     }
 }

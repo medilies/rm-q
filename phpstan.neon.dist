@@ -4,7 +4,7 @@ parameters:
         - src
         - config
         - database
-        # Analyses RmqStageOnDeleteTrait through a model that uses it.
+        # Analyses StagesFilesOnDelete through a model that uses it.
         - tests/test-app
     tmpDir: build/phpstan
     checkOctaneCompatibility: true

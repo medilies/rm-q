@@ -4,10 +4,7 @@ use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Sleep;
-use Illuminate\Support\Str;
 use Medilies\RmQ\DeletionReport;
-use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Events\StagedFilesProcessed;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
@@ -28,20 +25,9 @@ it('waits for the grace period', function () {
     $this->travel(2)->seconds();
     $onTime = RmQ::deleteAll();
 
-    expect($onTime->deleted())->toBe(1)
+    expect($onTime->deleted)->toBe(1)
         ->and($file)->not->toBeFile()
-        ->and(RmqFile::query()->sole()->status)->toBe(Status::Deleted);
-});
-
-it('deletes rows staged by other processes', function () {
-    // The command runs in a fresh process: nothing was staged by its own instance.
-    $file = $this->temporaryFile();
-    stagedRow($file, ['staged_at' => now()->subDays(2)]);
-
-    $report = RmQ::deleteAll();
-
-    expect($report->deleted())->toBe(1)
-        ->and($file)->not->toBeFile();
+        ->and(RmqFile::query()->count())->toBe(0);
 });
 
 it('takes the grace period as an argument', function () {
@@ -49,30 +35,21 @@ it('takes the grace period as an argument', function () {
     $file = $this->temporaryFile();
     RmQ::stage($file);
 
-    expect(RmQ::deleteAll(after: 0)->deleted())->toBe(1)
+    expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
         ->and($file)->not->toBeFile();
 });
 
-it('accepts the grace period config as a numeric string, as env() returns it', function () {
-    config(['rm-q.after' => '0']);
-    $file = $this->temporaryFile();
-    RmQ::stage($file);
-
-    expect(RmQ::deleteAll()->deleted())->toBe(1)
-        ->and($file)->not->toBeFile();
-});
-
-it('rejects invalid config and arguments', function (array $config, array $arguments, string $message) {
+it('rejects invalid config and arguments', function (array $config, array $arguments, string $exception, string $message) {
     config($config);
 
-    expect(fn () => RmQ::deleteAll(...$arguments))->toThrow(RmqException::class, $message);
+    expect(fn () => RmQ::deleteAll(...$arguments))->toThrow($exception, $message);
 })->with([
-    'after config' => [['rm-q.after' => 'one day'], [], 'rm-q.after'],
-    'negative after config' => [['rm-q.after' => -1], [], 'rm-q.after'],
-    'chunk config' => [['rm-q.chunk' => 0], [], 'rm-q.chunk'],
-    'claim_timeout config' => [['rm-q.claim_timeout' => 0], [], 'rm-q.claim_timeout'],
-    'negative after' => [[], ['after' => -1], '[after]'],
-    'limit' => [[], ['limit' => 0], '[limit]'],
+    'after config not an integer' => [['rm-q.after' => 'one day'], [], InvalidArgumentException::class, 'rm-q.after'],
+    'negative after config' => [['rm-q.after' => -1], [], RmqException::class, 'rm-q.after'],
+    'chunk config' => [['rm-q.chunk' => 0], [], RmqException::class, 'rm-q.chunk'],
+    'max_attempts config' => [['rm-q.max_attempts' => 0], [], RmqException::class, 'rm-q.max_attempts'],
+    'negative after' => [[], ['after' => -1], RmqException::class, '[after]'],
+    'limit' => [[], ['limit' => 0], RmqException::class, '[limit]'],
 ]);
 
 it('rejects a negative grace period when counting', function () {
@@ -80,20 +57,21 @@ it('rejects a negative grace period when counting', function () {
 });
 
 it('refuses to run inside a transaction', function () {
-    expect(fn () => RmQ::transaction(fn () => RmQ::deleteAll()))
+    expect(fn () => DB::transaction(fn () => RmQ::deleteAll()))
         ->toThrow(RmqException::class, 'cannot run inside a transaction on the rm-q connection');
 });
 
-it('stops at the limit', function () {
-    RmQ::stage($this->temporaryFiles(5));
+it('stops at the limit, oldest first', function () {
+    $files = $this->temporaryFiles(5);
+    RmQ::stage($files);
 
     $report = RmQ::deleteAll(after: 0, limit: 2);
 
     expect($report->processed())->toBe(2)
-        ->and(RmqFile::query()->where('status', Status::Staged)->count())->toBe(3);
+        ->and(RmqFile::query()->orderBy('id')->pluck('path')->all())->toBe(array_slice($files, 2));
 });
 
-it('retries failures until they run out of attempts', function () {
+it('retries a failure at each later run until it runs out of attempts', function () {
     config(['rm-q.max_attempts' => 3]);
     brokenDisk('Access Denied');
     RmQ::stage('file.txt', 'broken');
@@ -101,18 +79,17 @@ it('retries failures until they run out of attempts', function () {
     $runs = [];
 
     for ($i = 0; $i < 4; $i++) {
-        $this->travel(1)->seconds(); // Failures are retried at most once per run.
         $runs[] = RmQ::deleteAll(after: 0);
     }
 
-    expect(array_map(fn (DeletionReport $report) => [$report->failed(), $report->exhausted()], $runs))
+    expect(array_map(fn (DeletionReport $report) => [$report->failed, $report->exhausted], $runs))
         ->toBe([[1, 0], [1, 0], [1, 1], [0, 0]])
         ->and(RmqFile::query()->sole())
-        ->status->toBe(Status::Failed)
-        ->attempts->toBe(3);
+        ->attempts->toBe(3)
+        ->error->toBe('Access Denied');
 });
 
-it('marks a retried file deleted once it succeeds', function () {
+it('removes the row of a retried file once it succeeds', function () {
     config(['filesystems.disks.flaky' => ['driver' => 'local', 'root' => $this->temporaryDirectory()]]);
     $disk = Mockery::mock(FilesystemContract::class);
     $disk->shouldReceive('delete')->andReturn(false, true);
@@ -120,50 +97,18 @@ it('marks a retried file deleted once it succeeds', function () {
     RmQ::stage('file.txt', 'flaky');
 
     RmQ::deleteAll(after: 0);
-    $this->travel(1)->seconds();
     $retry = RmQ::deleteAll(after: 0);
 
-    expect($retry->deleted())->toBe(1)
-        ->and(RmqFile::query()->sole())
-        ->status->toBe(Status::Deleted)
-        ->attempts->toBe(2)
-        ->error->toBeNull();
+    expect($retry->deleted)->toBe(1)
+        ->and(RmqFile::query()->count())->toBe(0);
 });
 
-it('skips rows claimed by another sweep until the claim times out', function () {
-    config(['rm-q.claim_timeout' => 600]);
-    $file = $this->temporaryFile();
-    $foreignToken = (string) Str::ulid();
-    stagedRow($file, [
-        'status' => Status::Processing->value,
-        'claimed_by' => $foreignToken,
-        'claimed_at' => now(),
-        'attempts' => 1,
-    ]);
-
-    RmQ::deleteAll(after: 0);
-
-    expect($file)->toBeFile()
-        ->and(RmqFile::query()->sole())
-        ->status->toBe(Status::Processing)
-        ->claimed_by->toBe($foreignToken);
-
-    $this->travel(601)->seconds();
-    RmQ::deleteAll(after: 0);
-
-    expect($file)->not->toBeFile()
-        ->and(RmqFile::query()->sole())
-        ->status->toBe(Status::Deleted)
-        ->attempts->toBe(2);
-});
-
-it('never overwrites a row another sweep took over', function () {
+it('counts the attempt before deleting, so a run that dies still uses it up', function () {
     config(['filesystems.disks.slow' => ['driver' => 'local', 'root' => $this->temporaryDirectory()]]);
-    $takeover = (string) Str::ulid();
+    $attemptsDuringDelete = null;
     $disk = Mockery::mock(FilesystemContract::class);
-    $disk->shouldReceive('delete')->andReturnUsing(function () use ($takeover) {
-        // Another sweep reclaims the row while this one is deleting the file.
-        RmqFile::query()->update(['claimed_by' => $takeover]);
+    $disk->shouldReceive('delete')->andReturnUsing(function () use (&$attemptsDuringDelete) {
+        $attemptsDuringDelete = RmqFile::query()->sole()->attempts;
 
         return true;
     });
@@ -172,70 +117,33 @@ it('never overwrites a row another sweep took over', function () {
 
     RmQ::deleteAll(after: 0);
 
-    expect(RmqFile::query()->sole())
-        ->status->toBe(Status::Processing)
-        ->claimed_by->toBe($takeover);
+    expect($attemptsDuringDelete)->toBe(1);
 });
 
-it('retries a statement that lost a deadlock', function () {
-    Sleep::fake();
+it('leaves alone the files that used up their attempts', function () {
+    config(['rm-q.max_attempts' => 3]);
     $file = $this->temporaryFile();
-    RmQ::stage($file);
-    $failures = failClaims(2, 'SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock; try restarting transaction');
+    stagedRow($file, ['attempts' => 3]); // e.g. three runs died while deleting it
 
-    expect(RmQ::deleteAll(after: 0)->deleted())->toBe(1)
-        ->and($failures->count)->toBe(2)
-        ->and($file)->not->toBeFile();
-
-    Sleep::assertSleptTimes(2);
+    expect(RmQ::deleteAll(after: 0)->processed())->toBe(0)
+        ->and($file)->toBeFile();
 });
 
-it('gives up on a statement that keeps losing lock races', function () {
-    Sleep::fake();
-    $file = $this->temporaryFile();
-    RmQ::stage($file);
-    $failures = failClaims(PHP_INT_MAX, 'SQLSTATE[HY000]: General error: 1205 Lock wait timeout exceeded; try restarting transaction');
+it('skips a row removed while the run was going', function () {
+    config(['filesystems.disks.local-mock' => ['driver' => 'local', 'root' => $this->temporaryDirectory()]]);
+    $deleted = [];
+    $disk = Mockery::mock(FilesystemContract::class);
+    $disk->shouldReceive('delete')->andReturnUsing(function (string $path) use (&$deleted) {
+        $deleted[] = $path;
+        RmqFile::query()->where('path', 'b.txt')->delete();
 
-    expect(fn () => RmQ::deleteAll(after: 0))->toThrow(RuntimeException::class, 'Lock wait timeout exceeded');
-
-    expect($failures->count)->toBe(5)
-        ->and($file)->toBeFile()
-        ->and(RmqFile::query()->sole()->status)->toBe(Status::Staged);
-});
-
-it('does not retry other errors', function () {
-    Sleep::fake();
-    RmQ::stage($this->temporaryFile());
-    $failures = failClaims(PHP_INT_MAX, 'SQLSTATE[42S02]: Base table or view not found');
-
-    expect(fn () => RmQ::deleteAll(after: 0))->toThrow(RuntimeException::class, 'Base table or view not found');
-
-    expect($failures->count)->toBe(1);
-
-    Sleep::assertNeverSlept();
-});
-
-it('skips the rows another sweep claimed first', function () {
-    $file = $this->temporaryFile();
-    RmQ::stage($file);
-    $winner = (string) Str::ulid();
-
-    // Another sweep claims the row between this sweep's select and its claim.
-    DB::connection()->beforeExecuting(function (string $query) use ($winner) {
-        if (preg_match('/^update\b.*attempts\W*\s*\+\s*1/i', $query) === 1) {
-            DB::connection()->table((new RmqFile)->getTable())->update([
-                'status' => Status::Processing->value,
-                'claimed_by' => $winner,
-                'claimed_at' => now(),
-            ]);
-        }
+        return true;
     });
+    Storage::set('local-mock', $disk);
+    RmQ::stage(['a.txt', 'b.txt'], 'local-mock');
 
-    $report = RmQ::deleteAll(after: 0);
-
-    expect($report->processed())->toBe(0)
-        ->and($file)->toBeFile()
-        ->and(RmqFile::query()->sole()->claimed_by)->toBe($winner);
+    expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
+        ->and($deleted)->toBe(['a.txt']);
 });
 
 it('works through large backlogs in bounded statements', function () {
@@ -252,8 +160,8 @@ it('works through large backlogs in bounded statements', function () {
 
     $report = RmQ::deleteAll(after: 0);
 
-    expect($report->deleted())->toBe(1200)
-        ->and(RmqFile::query()->where('status', Status::Deleted)->count())->toBe(1200)
+    expect($report->deleted)->toBe(1200)
+        ->and(RmqFile::query()->count())->toBe(0)
         ->and($maxBindings)->toBeLessThanOrEqual(1000);
 });
 
@@ -264,5 +172,5 @@ it('dispatches one event per run', function () {
     RmQ::deleteAll(after: 0);
 
     Event::assertDispatchedTimes(StagedFilesProcessed::class, 1);
-    Event::assertDispatched(StagedFilesProcessed::class, fn (StagedFilesProcessed $event) => $event->report->deleted() === 2);
+    Event::assertDispatched(StagedFilesProcessed::class, fn (StagedFilesProcessed $event) => $event->report->deleted === 2);
 });

@@ -5,20 +5,17 @@ namespace Medilies\RmQ\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
-use Medilies\RmQ\Enums\Status;
-use Medilies\RmQ\Support\Settings;
+use Illuminate\Support\Facades\Config;
+use Medilies\RmQ\Exceptions\RmqException;
 
 /**
+ * A staged file: removed once the file is deleted.
+ *
  * @property int $id
  * @property string $path
  * @property ?string $disk
- * @property Status $status
- * @property string $instance
  * @property Carbon $staged_at
  * @property int $attempts
- * @property ?string $claimed_by
- * @property ?Carbon $claimed_at
- * @property ?Carbon $processed_at
  * @property ?string $error
  */
 final class RmqFile extends Model
@@ -39,34 +36,37 @@ final class RmqFile extends Model
 
     public function getTable(): string
     {
-        return Settings::table();
+        return Config::string('rm-q.table');
     }
 
+    /** Must be the connection your business transactions run on. Null is the default connection. */
     public function getConnectionName(): ?string
     {
-        return Settings::connection();
+        $connection = Config::get('rm-q.connection');
+
+        if ($connection !== null && ! is_string($connection)) {
+            throw RmqException::invalidConfig('rm-q.connection', 'a connection name or null');
+        }
+
+        return $connection;
     }
 
     /**
-     * Failed rows that used up their attempts: only `rm-q:retry` brings them back.
+     * Files that used up their attempts: only `rm-q:retry` brings them back.
      *
      * @param  Builder<self>  $query
      */
     public function scopeGaveUp(Builder $query): void
     {
-        $query->where('status', Status::Failed->value)
-            ->where('attempts', '>=', Settings::int('max_attempts', 1));
+        $query->where('attempts', '>=', Config::integer('rm-q.max_attempts'));
     }
 
     /** @return array<string, string> */
     protected function casts(): array
     {
         return [
-            'status' => Status::class,
             'attempts' => 'integer',
             'staged_at' => 'datetime',
-            'claimed_at' => 'datetime',
-            'processed_at' => 'datetime',
         ];
     }
 }
