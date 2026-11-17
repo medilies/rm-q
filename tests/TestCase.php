@@ -3,6 +3,7 @@
 namespace Tests;
 
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\RmqServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -30,6 +31,10 @@ abstract class TestCase extends Orchestra
         $connection = env('DB_CONNECTION', 'testing');
 
         $app['config']->set('database.default', $connection);
+
+        // Files are staged on a local disk of their own, the default one.
+        $app['config']->set('filesystems.disks.temp', ['driver' => 'local', 'root' => $this->temporaryDirectory()]);
+        $app['config']->set('filesystems.default', 'temp');
 
         // CI runs the database jobs with a skewed session timezone: grace periods must not depend on it.
         if (is_string($timezone = env('RM_Q_TEST_DB_TIMEZONE'))) {
@@ -66,19 +71,19 @@ abstract class TestCase extends Orchestra
     }
 
     /**
-     * Files with content, in a new temporary directory.
+     * Files with content, in a new directory of the default disk.
      *
-     * @return list<string>
+     * @return list<string> Paths on the default disk.
      */
     public function temporaryFiles(int $count = 1): array
     {
-        $directory = $this->temporaryDirectory();
+        $directory = 'dir-'.bin2hex(random_bytes(8));
         $files = [];
 
         for ($i = 0; $i < $count; $i++) {
-            $files[] = $file = $directory.DIRECTORY_SEPARATOR."file-{$i}.txt";
+            $files[] = $file = "{$directory}/file-{$i}.txt";
 
-            file_put_contents($file, 'rm-q');
+            Storage::put($file, 'rm-q');
         }
 
         return $files;

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
@@ -16,7 +17,7 @@ it('rolls the staging back with the transaction', function () {
     RmQ::deleteAll(after: 0);
 
     expect(RmqFile::query()->count())->toBe(0)
-        ->and($file)->toBeFile();
+        ->and(Storage::path($file))->toBeFile();
 });
 
 it('keeps nothing from a nested transaction whose parent rolls back', function () {
@@ -31,7 +32,7 @@ it('keeps nothing from a nested transaction whose parent rolls back', function (
     RmQ::deleteAll(after: 0);
 
     expect(RmqFile::query()->count())->toBe(0)
-        ->and($file)->toBeFile();
+        ->and(Storage::path($file))->toBeFile();
 });
 
 it('keeps the outer staging when a nested transaction rolls back', function () {
@@ -54,6 +55,6 @@ it('keeps the outer staging when a nested transaction rolls back', function () {
 
     RmQ::deleteAll(after: 0);
 
-    expect($outer)->not->toBeFile()
-        ->and($inner)->toBeFile();
+    expect(Storage::path($outer))->not->toBeFile()
+        ->and(Storage::path($inner))->toBeFile();
 });

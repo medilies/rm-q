@@ -4,6 +4,7 @@ namespace Medilies\RmQ;
 
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\DatabaseTransactionRecord;
 use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Database\Eloquent\Builder;
@@ -33,14 +34,16 @@ class RmQ
     /**
      * Stage files for deletion. The rows join (and roll back with) any transaction open on the rm-q connection.
      *
-     * @param  string|Stringable|iterable<mixed>  $paths  Absolute local paths, or paths on $disk.
+     * @param  string|Stringable|iterable<mixed>  $paths  Paths on $disk.
+     * @param  string|null  $disk  A configured disk; defaults to `filesystems.default`.
      * @return int The number of staged paths (duplicates are staged once).
      *
      * @throws RmqException When a path or the disk is invalid.
      */
     public function stage(string|Stringable|iterable $paths, ?string $disk = null): int
     {
-        $paths = Paths::normalize($paths, $disk);
+        $disk = Paths::disk($disk);
+        $paths = Paths::normalize($paths);
         $now = Date::now();
 
         foreach (array_chunk($paths, self::INSERT_CHUNK) as $chunk) {
@@ -169,25 +172,27 @@ class RmQ
     /** @return string|null Why the file could not be deleted, or null once it is gone. */
     private function deleteFile(RmqFile $file): ?string
     {
-        $violation = Paths::violation($file->path, $file->disk);
+        $violation = Paths::violation($file->path);
 
         if ($violation !== null) {
             return "The path {$violation}";
         }
 
         try {
-            if ($file->disk === null) {
-                return $this->deleteLocalFile($file->path);
-            }
-
             // Any Filesystem implementation: custom drivers and Storage::set() need not be FilesystemAdapters.
             $disk = app(FilesystemFactory::class)->disk($file->disk);
+
+            $unavailable = $this->unavailableStorage($file, $disk);
+
+            if ($unavailable !== null) {
+                return $unavailable;
+            }
 
             if ($disk instanceof FilesystemAdapter) {
                 // Flysystem throws with the reason, whatever the disk's `throw` option says.
                 $disk->getDriver()->delete($file->path);
 
-                return null; // A missing file counts as deleted, like on S3.
+                return null; // A missing file counts as deleted: local storage was checked above.
             }
 
             return $disk->delete($file->path) ? null : 'The disk could not delete the file';
@@ -196,42 +201,33 @@ class RmQ
         }
     }
 
-    private function deleteLocalFile(string $path): ?string
+    /**
+     * Why a local disk can't tell whether the file is missing, or null when it can. An unmounted volume looks like an
+     * empty directory, or no directory at all: a missing parent directory means the file is out of reach, not gone.
+     * Other disks, like S3, have no directories of their own.
+     */
+    private function unavailableStorage(RmqFile $file, Filesystem $disk): ?string
     {
-        clearstatcache(true, $path);
-
-        if (! file_exists($path) && ! is_link($path)) {
-            return null; // Already missing.
-        }
-
-        if (is_dir($path) && ! is_link($path)) {
-            return 'The path is a directory';
-        }
-
-        // Laravel's error handler swallows warnings, even suppressed ones, so error_get_last() stays empty.
-        $error = null;
-
-        set_error_handler(function (int $level, string $message) use (&$error): bool {
-            $error = $message;
-
-            return true;
-        });
-
-        try {
-            $deleted = unlink($path); // For a symlink, only the link is removed.
-        } finally {
-            restore_error_handler();
-        }
-
-        if ($deleted) {
+        if (! $disk instanceof FilesystemAdapter || ! Paths::isLocalDisk($file->disk)) {
             return null;
         }
 
-        clearstatcache(true, $path);
+        // The resolved disk's root, not the configured one: Storage::fake() roots the disk elsewhere.
+        $root = rtrim($disk->path(''), '/\\');
 
-        return file_exists($path) || is_link($path)
-            ? $error ?? 'unlink() failed'
-            : null; // Removed concurrently.
+        if ($root === '') {
+            return null; // Built by hand without a root: nothing to check against.
+        }
+
+        $parent = dirname($disk->path($file->path));
+
+        clearstatcache();
+
+        return match (true) {
+            ! is_dir($root) => "The disk root [{$root}] does not exist: the storage may be unavailable",
+            ! is_dir($parent) => "The parent directory [{$parent}] does not exist: the storage may be unavailable",
+            default => null,
+        };
     }
 
     /** An integer `rm-q` setting of at least $min; numeric strings are accepted. */

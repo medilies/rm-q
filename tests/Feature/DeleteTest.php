@@ -1,12 +1,14 @@
 <?php
 
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Events\FileDeletionFailed;
 use Medilies\RmQ\Events\StagedFilesProcessed;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
+use Medilies\RmQ\Support\Paths;
 
 // How each file is deleted, and what a failure records. The grace period is covered in DeleteAllTest.
 
@@ -17,9 +19,7 @@ it('deletes the staged files and removes their rows', function () {
 
     expect(RmQ::deleteAll(after: 0)->deleted)->toBe(3);
 
-    foreach ($files as $file) {
-        expect($file)->not->toBeFile();
-    }
+    Storage::assertMissing($files);
 
     expect(RmqFile::query()->count())->toBe(0);
 });
@@ -27,50 +27,119 @@ it('deletes the staged files and removes their rows', function () {
 it('treats an already missing file as deleted', function () {
     $file = $this->temporaryFile();
     RmQ::stage($file);
-    unlink($file);
+    Storage::delete($file);
 
     expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
         ->and(RmqFile::query()->count())->toBe(0);
 });
 
-it('does not delete directories', function () {
-    $directory = $this->temporaryDirectory();
-    RmQ::stage($directory);
+it('fails when the directory of a missing file is gone, as on an unmounted volume', function () {
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+    Storage::deleteDirectory(dirname($file));
+
+    $report = RmQ::deleteAll(after: 0);
+
+    expect($report->failed)->toBe(1)
+        ->and(RmqFile::query()->sole())
+        ->attempts->toBe(1)
+        ->error->toBe('The parent directory ['.dirname(Storage::path($file)).'] does not exist: the storage may be unavailable');
+});
+
+it('fails when the disk root is gone', function () {
+    $root = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'mount';
+    config(['filesystems.disks.nfs' => ['driver' => 'local', 'root' => $root, 'lazy_root_creation' => true]]);
+    RmQ::stage('file.txt', 'nfs');
 
     RmQ::deleteAll(after: 0);
 
-    expect($directory)->toBeDirectory()
+    expect(RmqFile::query()->sole()->error)->toBe("The disk root [{$root}] does not exist: the storage may be unavailable")
+        ->and($root)->not->toBeDirectory();
+})->skip(version_compare(Application::VERSION, '13.35.0', '<'), 'lazy_root_creation needs Laravel 13.35');
+
+it('still fails for a file in a subdirectory when resolving the disk recreates its root', function () {
+    $root = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'mount';
+    config(['filesystems.disks.nfs' => ['driver' => 'local', 'root' => $root]]);
+    RmQ::stage('avatars/1.jpg', 'nfs');
+
+    RmQ::deleteAll(after: 0);
+
+    expect(RmqFile::query()->sole()->error)->toBe("The parent directory [{$root}".DIRECTORY_SEPARATOR.'avatars] does not exist: the storage may be unavailable')
+        ->and($root)->toBeDirectory();
+});
+
+it('treats local disks and scoped disks over them as local', function (string $disk, bool $local) {
+    config(['filesystems.disks' => [
+        'temp' => ['driver' => 'local', 'root' => '/tmp'],
+        's3' => ['driver' => 's3'],
+        'avatars' => ['driver' => 'scoped', 'disk' => 'temp', 'prefix' => 'avatars'],
+        'small' => ['driver' => 'scoped', 'disk' => 'avatars', 'prefix' => 'small'],
+        'inline' => ['driver' => 'scoped', 'disk' => ['driver' => 'local', 'root' => '/tmp'], 'prefix' => 'x'],
+        'bucket' => ['driver' => 'scoped', 'disk' => 's3', 'prefix' => 'x'],
+        'loop' => ['driver' => 'scoped', 'disk' => 'loop', 'prefix' => 'x'],
+    ]]);
+
+    expect(Paths::isLocalDisk($disk))->toBe($local);
+})->with([
+    'local' => ['temp', true],
+    's3' => ['s3', false],
+    'scoped over local' => ['avatars', true],
+    'scoped over scoped over local' => ['small', true],
+    'scoped over an inline local config' => ['inline', true],
+    'scoped over s3' => ['bucket', false],
+    'scoped over itself' => ['loop', false],
+    'unknown' => ['nope', false],
+]);
+
+it('checks the root a faked local disk really uses', function () {
+    config(['filesystems.disks.public' => ['driver' => 'local', 'root' => '/nonexistent/rm-q/public']]);
+    Storage::fake('public');
+
+    RmQ::stage('missing.jpg', 'public');
+
+    expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1);
+});
+
+it('does not delete directories', function () {
+    Storage::makeDirectory('directory');
+    RmQ::stage('directory');
+
+    RmQ::deleteAll(after: 0);
+
+    expect(Storage::path('directory'))->toBeDirectory()
         ->and(RmqFile::query()->sole())
         ->attempts->toBe(1)
-        ->error->toBe('The path is a directory');
+        ->error->toContain('Unable to delete file');
 });
 
 it('removes a symlink but not its target', function () {
-    $target = $this->temporaryFile();
-    $link = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'link';
-    symlink($target, $link);
+    $target = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'target.txt';
+    file_put_contents($target, 'rm-q');
+    symlink($target, Storage::path('link'));
 
-    RmQ::stage($link);
+    RmQ::stage('link');
     RmQ::deleteAll(after: 0);
 
-    expect(is_link($link))->toBeFalse()
+    expect(is_link(Storage::path('link')))->toBeFalse()
         ->and($target)->toBeFile()
         ->and(RmqFile::query()->count())->toBe(0);
 })->skipOnWindows();
 
 it('records why a local file could not be deleted', function () {
     $file = $this->temporaryFile();
-    chmod(dirname($file), 0555);
+    $directory = dirname(Storage::path($file));
+    chmod($directory, 0555);
 
     try {
         RmQ::stage($file);
         RmQ::deleteAll(after: 0);
     } finally {
-        chmod(dirname($file), 0755);
+        chmod($directory, 0755);
     }
 
-    expect($file)->toBeFile()
-        ->and(RmqFile::query()->sole()->error)->toContain('Permission denied');
+    Storage::assertExists($file);
+
+    expect(RmqFile::query()->sole()->error)->toContain('Unable to delete file');
 })->skipOnWindows()->skip(fn () => function_exists('posix_geteuid') && posix_geteuid() === 0, 'root ignores permissions');
 
 it('deletes files on a disk', function () {
@@ -86,6 +155,7 @@ it('deletes files on a disk', function () {
 });
 
 it('treats a file already missing from a disk as deleted', function () {
+    // Faked, but still S3 to rm-q: directories don't exist on their own there.
     Storage::fake('s3');
 
     RmQ::stage('avatars/missing.jpg', 's3');
@@ -126,35 +196,16 @@ it('fails when the disk is no longer configured', function () {
     expect(RmqFile::query()->sole()->error)->toContain('Disk [s3] does not have a configured driver');
 });
 
-it('checks the allowed directories again before deleting', function () {
+it('checks the path again before deleting', function () {
     $file = $this->temporaryFile();
-    RmQ::stage($file);
-    config(['rm-q.allowed_directories' => [$this->temporaryDirectory()]]);
+    stagedRow('../'.$file);
 
     RmQ::deleteAll(after: 0);
 
-    expect($file)->toBeFile()
-        ->and(RmqFile::query()->sole()->error)->toContain('allowed_directories');
+    Storage::assertExists($file);
+
+    expect(RmqFile::query()->sole()->error)->toBe('The path must not contain ".." segments');
 });
-
-it('checks where directories really are when deleting', function () {
-    $allowed = $this->temporaryDirectory();
-    $outside = $this->temporaryDirectory();
-    file_put_contents($outside.DIRECTORY_SEPARATOR.'secret.txt', 'secret');
-    mkdir($allowed.DIRECTORY_SEPARATOR.'uploads');
-    config(['rm-q.allowed_directories' => [$allowed]]);
-
-    RmQ::stage($allowed.DIRECTORY_SEPARATOR.'uploads'.DIRECTORY_SEPARATOR.'secret.txt');
-
-    // The directory is swapped for a symlink between staging and deleting.
-    rmdir($allowed.DIRECTORY_SEPARATOR.'uploads');
-    symlink($outside, $allowed.DIRECTORY_SEPARATOR.'uploads');
-
-    RmQ::deleteAll(after: 0);
-
-    expect($outside.DIRECTORY_SEPARATOR.'secret.txt')->toBeFile()
-        ->and(RmqFile::query()->sole()->error)->toContain('allowed_directories');
-})->skipOnWindows();
 
 it('records the failure before a listener can throw', function () {
     brokenDisk('Access Denied');

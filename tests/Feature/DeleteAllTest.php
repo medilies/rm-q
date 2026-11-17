@@ -21,13 +21,13 @@ it('waits for the grace period', function () {
     $early = RmQ::deleteAll();
 
     expect($early->processed())->toBe(0)
-        ->and($file)->toBeFile();
+        ->and(Storage::path($file))->toBeFile();
 
     $this->travel(2)->seconds();
     $onTime = RmQ::deleteAll();
 
     expect($onTime->deleted)->toBe(1)
-        ->and($file)->not->toBeFile()
+        ->and(Storage::path($file))->not->toBeFile()
         ->and(RmqFile::query()->count())->toBe(0);
 });
 
@@ -37,7 +37,7 @@ it('takes the grace period as an argument', function () {
     RmQ::stage($file);
 
     expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
-        ->and($file)->not->toBeFile();
+        ->and(Storage::path($file))->not->toBeFile();
 });
 
 it('reads the grace period from a numeric string', function (string $after, int $staleness, bool $deleted) {
@@ -179,7 +179,7 @@ it('leaves alone the files that used up their attempts', function () {
     stagedRow($file, ['attempts' => 3]); // e.g. three runs died while deleting it
 
     expect(RmQ::deleteAll(after: 0)->processed())->toBe(0)
-        ->and($file)->toBeFile();
+        ->and(Storage::path($file))->toBeFile();
 });
 
 it('skips a row removed while the run was going', function () {
