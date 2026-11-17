@@ -17,7 +17,7 @@ class RmqCleanupCommand extends Command
     use ReadsIntegerOptions;
 
     /** Rows removed per statement, to keep locks and transactions short. */
-    private const CHUNK = 1000;
+    private const int CHUNK = 1000;
 
     public $signature = 'rm-q:cleanup
         {--days= : Keep the rows processed in the last N days (default: the rm-q.cleanup_after_days config)}

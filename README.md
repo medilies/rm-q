@@ -62,7 +62,7 @@ picked up later by the `rm-q:delete` command.
 
 Requirements:
 
-- PHP 8.2+ and Laravel 12 or 13.
+- PHP 8.3+ and Laravel 12 or 13.
 - SQLite, MySQL, MariaDB or PostgreSQL. CI runs the test suite on SQLite, MySQL 8.4, MariaDB 11.4 and
   PostgreSQL 17. SQL Server is not tested.
 

@@ -38,10 +38,10 @@ class RmQ
     use DetectsConcurrencyErrors;
 
     /** 6 columns per row: stays well below SQL Server's 2100 bindings limit. */
-    private const INSERT_CHUNK = 150;
+    private const int INSERT_CHUNK = 150;
 
     /** Tries per sweep statement when it loses a deadlock or a lock race. */
-    private const STATEMENT_ATTEMPTS = 5;
+    private const int STATEMENT_ATTEMPTS = 5;
 
     private readonly string $instance;
 
