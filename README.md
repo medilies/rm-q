@@ -240,8 +240,10 @@ missing file counts as deleted only when the disk root and the file's directory 
 with "the storage may be unavailable", and is retried like any failure. Other disks, like S3, have no directories of
 their own: a missing file there always counts as deleted.
 
-- **Set `'lazy_root_creation' => true`** on disks backed by a mount. Otherwise Laravel recreates a missing disk root
-  when it resolves the disk, possibly on the bare mount point, and files right in the root then count as deleted.
+- **Set `'lazy_root_creation' => true`** on disks backed by a mount (Laravel 13.35+). Otherwise Laravel recreates a
+  missing disk root when it resolves the disk, possibly on the bare mount point, and files right in the root then
+  count as deleted. On older Laravel versions, the root is always recreated: only files in subdirectories of the root
+  are protected.
 - **Point the disk root at a subdirectory of the mount**, not at the mount point itself: an unmounted mount point is
   an empty directory that exists.
 - **Don't delete the directories of staged files yourself.** Their files would fail until they give up. Stage the

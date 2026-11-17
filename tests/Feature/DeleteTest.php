@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Events\FileDeletionFailed;
@@ -54,6 +55,17 @@ it('fails when the disk root is gone', function () {
 
     expect(RmqFile::query()->sole()->error)->toBe("The disk root [{$root}] does not exist: the storage may be unavailable")
         ->and($root)->not->toBeDirectory();
+})->skip(version_compare(Application::VERSION, '13.35.0', '<'), 'lazy_root_creation needs Laravel 13.35');
+
+it('still fails for a file in a subdirectory when resolving the disk recreates its root', function () {
+    $root = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'mount';
+    config(['filesystems.disks.nfs' => ['driver' => 'local', 'root' => $root]]);
+    RmQ::stage('avatars/1.jpg', 'nfs');
+
+    RmQ::deleteAll(after: 0);
+
+    expect(RmqFile::query()->sole()->error)->toBe("The parent directory [{$root}".DIRECTORY_SEPARATOR.'avatars] does not exist: the storage may be unavailable')
+        ->and($root)->toBeDirectory();
 });
 
 it('treats local disks and scoped disks over them as local', function (string $disk, bool $local) {
