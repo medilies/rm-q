@@ -220,6 +220,7 @@ it('records the failure before a listener can throw', function () {
 });
 
 it('reports failures through events', function () {
+    $this->freezeSecond();
     Event::fake([FileDeletionFailed::class, StagedFilesProcessed::class]);
     brokenDisk('Access Denied');
 
@@ -230,7 +231,8 @@ it('reports failures through events', function () {
         && $event->disk === 'broken'
         && $event->error === 'Access Denied'
         && $event->attempts === 1
-        && $event->willRetry);
+        && $event->willRetry
+        && $event->nextAttemptAt?->equalTo(now()->addSeconds(900)));
 
     Event::assertDispatched(StagedFilesProcessed::class, fn (StagedFilesProcessed $event) => $event->report->failed === 1
         && $event->report->deleted === 0);

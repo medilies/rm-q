@@ -113,7 +113,7 @@ describe('rm-q:stats', function () {
 describe('rm-q:retry', function () {
     it('gives the failures that gave up a new round of attempts', function () {
         config(['rm-q.max_attempts' => 3]);
-        $gaveUp = stagedRow('/tmp/gave-up.txt', ['attempts' => 3, 'error' => 'Access Denied']);
+        $gaveUp = stagedRow('/tmp/gave-up.txt', ['attempts' => 3, 'error' => 'Access Denied', 'next_attempt_at' => now()->addDay()]);
         $retrying = stagedRow('/tmp/retrying.txt', ['attempts' => 1, 'error' => 'Timeout']);
 
         $this->artisan('rm-q:retry')
@@ -123,6 +123,7 @@ describe('rm-q:retry', function () {
         expect($gaveUp->fresh())
             ->attempts->toBe(0)
             ->error->toBeNull()
+            ->next_attempt_at->toBeNull()
             ->and($retrying->fresh())
             ->attempts->toBe(1)
             ->error->toBe('Timeout');

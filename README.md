@@ -106,7 +106,8 @@ stateDiagram-v2
     Staged --> [*]: the transaction rolls back
     Staged --> [*]: rm-q#58;delete deletes the file
     Staged --> Failed: the deletion fails
-    Failed --> [*]: a later run deletes the file
+    Failed --> Failed: the backoff is not over yet
+    Failed --> [*]: a run after the backoff deletes the file
     Failed --> GaveUp: max_attempts used up
     GaveUp --> Staged: rm-q#58;retry
 ```
@@ -114,9 +115,11 @@ stateDiagram-v2
 - `rm-q:delete` deletes the files staged longer ago than the grace period, oldest first, and removes their rows. A file
   that was already missing counts as deleted, unless its storage may be unavailable: see
   [Network storage](#network-storage).
-- A failed deletion keeps its row, with the error, and each later run retries it until it has used up
-  `rm-q.max_attempts` attempts.
-- An attempt counts before the file is deleted, so a file whose deletion crashes the run is given up too.
+- A failed deletion keeps its row, with the error, and is retried once its backoff is over (`rm-q.backoff`: 15
+  minutes, then 1 hour, 6 hours and 1 day), until it has used up `rm-q.max_attempts` attempts. A short storage outage
+  doesn't use up the attempts of the files due during it.
+- An attempt, and the backoff after it, count before the file is deleted, so a file whose deletion crashes the run
+  waits and is given up too.
 
 ## Staging files
 
@@ -195,7 +198,7 @@ when called inside a transaction on the rm-q connection, since that transaction'
   `->emailOutputOnFailure()` on the schedule to get alerted.
 - **Events:**
   - `Medilies\RmQ\Events\FileDeletionFailed` is dispatched for each failed attempt; its `willRetry` property tells
-    you whether the deletion will be retried.
+    you whether the deletion will be retried, and `nextAttemptAt` when.
   - `Medilies\RmQ\Events\StagedFilesProcessed` is dispatched after each run, with its `DeletionReport`.
 - **Given-up files** keep their row and error until `rm-q:retry` gives them new attempts. To give up on them for
   good, delete their rows: `Medilies\RmQ\Models\RmqFile::query()->gaveUp()->delete()`.
@@ -216,7 +219,8 @@ when called inside a transaction on the rm-q connection, since that transaction'
 | `table` | `rm_q_files` | Name of the rm-q table. Read by the migration: changing it after migrating needs a migration of your own. |
 | `after` | `env('RM_Q_AFTER')`, 1 day when unset | Grace period, in seconds, before `rm-q:delete` deletes a staged file. An invalid value logs a warning and uses 1 day. |
 | `chunk` | `500` | Rows read and processed per batch. |
-| `max_attempts` | `3` | Attempts before a failed deletion is given up. |
+| `max_attempts` | `5` | Attempts before a failed deletion is given up. |
+| `backoff` | `[900, 3600, 21600, 86400]` | Seconds to wait before attempting a failed deletion again; the last delay repeats. By default, a file gives up about 31 hours after its first failure. |
 
 ## Things to know
 

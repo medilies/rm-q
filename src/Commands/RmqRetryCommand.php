@@ -13,7 +13,7 @@ class RmqRetryCommand extends Command
 
     public function handle(): int
     {
-        $count = RmqFile::query()->gaveUp()->update(['attempts' => 0, 'error' => null]);
+        $count = RmqFile::query()->gaveUp()->update(['attempts' => 0, 'error' => null, 'next_attempt_at' => null]);
 
         $this->components->info("{$count} failed deletion(s) will be retried by the next rm-q:delete run.");
 

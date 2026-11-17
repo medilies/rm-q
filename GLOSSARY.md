@@ -24,6 +24,10 @@ One try at deleting a staged file. It counts even when the run dies during it.
 A staged file whose last attempt did not delete it, and which keeps its error until a later attempt.
 _Avoid_: Error row
 
+**Backoff**:
+The wait before a failed deletion is attempted again; it grows with each attempt.
+_Avoid_: Retry delay, cooldown
+
 **Given-up file**:
 A failed deletion that used up its attempts: only a retry brings it back.
 _Avoid_: Exhausted file, dead file

@@ -20,5 +20,12 @@ return [
     'chunk' => 500,
 
     /* A failed deletion is retried by `rm-q:delete` until it reaches this many attempts. */
-    'max_attempts' => 3,
+    'max_attempts' => 5,
+
+    /*
+     * Seconds to wait before attempting a failed deletion again: the first delay follows the first failure, and the
+     * last one repeats. The default retries after 15 minutes, 1 hour, 6 hours and 1 day, so with 5 attempts a file
+     * gives up about 31 hours after its first failure: a short storage outage doesn't use up its attempts.
+     */
+    'backoff' => [900, 3600, 21600, 86400],
 ];
