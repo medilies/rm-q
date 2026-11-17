@@ -175,8 +175,16 @@ Deleting an `Image` stages its files, in the same transaction as the deletion.
 - **Partial selects:** columns left out of a `select` are read from the database before the row is deleted.
 - **Invalid paths:** an invalid path makes `delete()` throw before the row is deleted.
 - **Connection:** the model must be on the rm-q connection. Otherwise `delete()` throws before the row is deleted.
+- **One path per column:** a column holding several paths (a JSON array) is staged as one literal path, so its
+  files are never deleted: the row is either removed as an already missing file, or fails until it gives up. Leave
+  such columns out of `rmqFileColumns()`, and stage their paths yourself with `RmQ::stage()` in a `deleted`
+  listener, which runs in the same transaction.
+- **Already deleted rows:** deleting an outdated instance whose row is already gone still fires `deleted`, so its
+  files are staged again. That's harmless: the second deletion finds nothing. The `DeletionReport` counts those
+  files twice.
 - **Not covered:** deletions that don't fire model events: `deleteQuietly()`, `forceDeleteQuietly()`, query
-  builder deletes (`Image::where(...)->delete()`) and database cascades.
+  builder deletes (`Image::where(...)->delete()`), `MassPrunable` pruning and database cascades. `Prunable`
+  deletes model by model, so it is covered.
 
 ### Unstaging files
 
