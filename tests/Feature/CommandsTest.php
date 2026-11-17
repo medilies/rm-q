@@ -101,6 +101,7 @@ describe('rm-q:stats', function () {
     it('outputs JSON', function () {
         expect(Artisan::call('rm-q:stats', ['--json' => true]))->toBe(Command::SUCCESS)
             ->and(json_decode(Artisan::output(), true))->toBe([
+                'paused' => false,
                 'pending' => 3,
                 'deletable_now' => 2,
                 'retrying' => 1,

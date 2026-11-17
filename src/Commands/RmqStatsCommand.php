@@ -24,6 +24,7 @@ class RmqStatsCommand extends Command
             : null;
 
         $stats = [
+            'paused' => RmQ::paused(),
             'pending' => $pending->clone()->count(),
             'deletable_now' => RmQ::countDeletable(),
             'retrying' => $pending->clone()->whereNotNull('error')->count(),
@@ -37,6 +38,7 @@ class RmqStatsCommand extends Command
             return self::SUCCESS;
         }
 
+        $this->components->twoColumnDetail('Paused', $stats['paused'] ? 'yes' : 'no');
         $this->components->twoColumnDetail('Pending', (string) $stats['pending']);
         $this->components->twoColumnDetail('  Deletable now', (string) $stats['deletable_now']);
         $this->components->twoColumnDetail('  Failed, will retry', (string) $stats['retrying']);

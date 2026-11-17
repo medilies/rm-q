@@ -37,9 +37,19 @@ class RmqDeleteCommand extends Command implements Isolatable
             }
         }
 
+        $paused = RmQ::paused();
+
+        if ($paused) {
+            $this->components->warn('rm-q is paused (rm-q.paused): no staged file will be deleted.');
+        }
+
         if ($this->option('dry-run')) {
             $this->components->info('Would process '.RmQ::countDeletable($after).' staged file(s).');
 
+            return self::SUCCESS;
+        }
+
+        if ($paused) {
             return self::SUCCESS;
         }
 

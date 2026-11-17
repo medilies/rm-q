@@ -16,6 +16,12 @@ return [
      */
     'after' => env('RM_Q_AFTER'),
 
+    /*
+     * Stops every deletion: `rm-q:delete` and RmQ::deleteAll() return without deleting anything, with a warning.
+     * Staging still works. Use it during an incident or while restoring a database backup.
+     */
+    'paused' => env('RM_Q_PAUSED', false),
+
     /* Rows read and processed per batch. */
     'chunk' => 500,
 

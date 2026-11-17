@@ -54,6 +54,24 @@ trait StagesFilesOnDelete
      */
     abstract public function rmqFileColumns(): array;
 
+    /**
+     * Cancel the deletion of the model's files, e.g. after restoring it from a backup.
+     *
+     * @return int The number of rows removed.
+     *
+     * @throws RmqException When a path or a disk is invalid, or the model is on another connection than rm-q.
+     */
+    public function rmqUnstageFiles(): int
+    {
+        $removed = 0;
+
+        foreach ($this->rmqCollectPaths() as $disk => $paths) {
+            $removed += app(RmQ::class)->unstage($paths, $disk);
+        }
+
+        return $removed;
+    }
+
     /** A SoftDeletes model being trashed rather than force-deleted. */
     private static function rmqIsSoftDeleting(Model $model): bool
     {

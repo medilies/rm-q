@@ -12,6 +12,7 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Medilies\RmQ\Events\FileDeletionFailed;
 use Medilies\RmQ\Events\StagedFilesProcessed;
@@ -30,6 +31,9 @@ class RmQ
 {
     /** 3 columns per row: stays well below SQL Server's 2100 bindings limit. */
     private const int INSERT_CHUNK = 150;
+
+    /** 2 bindings plus one per path: stays below SQL Server's 2100 bindings limit. */
+    private const int UNSTAGE_CHUNK = 1000;
 
     /**
      * Stage files for deletion. The rows join (and roll back with) any transaction open on the rm-q connection.
@@ -59,8 +63,47 @@ class RmQ
     }
 
     /**
+     * Cancel the deletion of staged files: removes every row of these paths on the disk, failed or given up too. The
+     * removal joins (and rolls back with) any transaction open on the rm-q connection. A run already deleting one of
+     * the files may still delete it: pause rm-q first.
+     *
+     * @param  string|Stringable|iterable<mixed>  $paths  Paths on $disk.
+     * @param  string|null  $disk  A configured disk; defaults to `filesystems.default`.
+     * @return int The number of rows removed.
+     *
+     * @throws RmqException When a path or the disk is invalid.
+     */
+    public function unstage(string|Stringable|iterable $paths, ?string $disk = null): int
+    {
+        $disk = Paths::disk($disk);
+        $removed = 0;
+
+        foreach (array_chunk(Paths::normalize($paths), self::UNSTAGE_CHUNK) as $chunk) {
+            $removed += RmqFile::query()->toBase()->where('disk', $disk)->whereIn('path', $chunk)->delete();
+        }
+
+        return $removed;
+    }
+
+    /**
+     * Whether `rm-q.paused` stops every deletion.
+     *
+     * @throws RmqException When the config is not a boolean.
+     */
+    public function paused(): bool
+    {
+        $paused = Config::get('rm-q.paused');
+
+        return match ($paused) {
+            null, false, 0, '0', 'false', '' => false,
+            true, 1, '1', 'true' => true,
+            default => throw RmqException::invalidConfig('rm-q.paused', 'a boolean'),
+        };
+    }
+
+    /**
      * Delete the files whose grace period is over, oldest first, retrying the failures whose backoff is over and that
-     * have attempts left.
+     * have attempts left. While rm-q is paused, deletes nothing and logs a warning.
      *
      * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after` (1 day when invalid).
      * @param  int|null  $limit  Maximum number of files to process.
@@ -74,6 +117,12 @@ class RmQ
         }
 
         $cutoff = $this->cutoff($after);
+
+        if ($this->paused()) {
+            Log::warning('rm-q is paused (rm-q.paused): no staged file was deleted.');
+
+            return new DeletionReport(0, 0, 0);
+        }
 
         if ($this->insideTransaction()) {
             throw RmqException::insideTransaction();

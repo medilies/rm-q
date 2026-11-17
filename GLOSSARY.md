@@ -13,6 +13,14 @@ _Avoid_: Queued file, pending deletion
 A configured filesystem disk the staged file lives on. Every staged file has one.
 _Avoid_: Absolute path, local path
 
+**Unstage**:
+Cancel the deletion of a staged file before it happens.
+_Avoid_: Cancel, dequeue
+
+**Paused**:
+A state in which no staged file is deleted, whatever its grace period.
+_Avoid_: Disabled, suspended
+
 **Grace period**:
 The elapsed time a staged file waits before it may be deleted, whatever the timezone.
 _Avoid_: Delay, TTL

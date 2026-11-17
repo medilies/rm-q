@@ -178,6 +178,19 @@ Deleting an `Image` stages its files, in the same transaction as the deletion.
 - **Not covered:** deletions that don't fire model events: `deleteQuietly()`, `forceDeleteQuietly()`, query
   builder deletes (`Image::where(...)->delete()`) and database cascades.
 
+### Unstaging files
+
+```php
+RmQ::unstage('exports/report.csv');         // on the default disk
+RmQ::unstage(['avatars/1.jpg'], 's3');      // on a disk
+$image->rmqUnstageFiles();                  // the files of a model using StagesFilesOnDelete
+```
+
+Unstaging cancels the deletion of files that are still staged: it removes every row of these paths on that disk,
+including failed and given-up ones, and returns how many. Paths and disks are validated like when staging. The
+removal takes part in your transaction, like staging. A file already deleted can't come back, and an `rm-q:delete`
+run that is deleting a file at that moment may still delete it: [pause](#pausing) first.
+
 ## Deleting the files
 
 `php artisan rm-q:delete` deletes the files staged longer ago than `rm-q.after`, and retries failures. See
@@ -190,9 +203,26 @@ when called inside a transaction on the rm-q connection, since that transaction'
 > The grace period leaves you time to notice a bug or restore a database backup before the files are gone. To delete
 > files sooner, lower `rm-q.after` and schedule the command more often.
 
+### Pausing
+
+Set `RM_Q_PAUSED=true` to stop every deletion: `rm-q:delete` and `RmQ::deleteAll()` delete nothing and warn instead.
+Staging and unstaging still work, and `rm-q:stats` shows the pause. With cached config, run `php artisan config:cache`
+after changing `.env`. An invalid value makes `rm-q:delete` fail without deleting anything.
+
+### Restoring a database backup
+
+Restoring your tables doesn't restore the rm-q table, so the files of the restored records are still staged. Before
+their grace period ends:
+
+1. Pause rm-q: set `RM_Q_PAUSED=true`.
+2. Restore the backup.
+3. Unstage the files of the restored records:
+   `Image::query()->whereKey($restoredIds)->each(fn (Image $image) => $image->rmqUnstageFiles())`.
+4. Resume: set `RM_Q_PAUSED=false`.
+
 ## Monitoring
 
-- **Stats:** `php artisan rm-q:stats` (or `--json`) shows the pending files, how many the next `rm-q:delete` run
+- **Stats:** `php artisan rm-q:stats` (or `--json`) shows whether rm-q is paused, the pending files, how many the next `rm-q:delete` run
   would process, the failures waiting for a retry, the ones that gave up, and the oldest staged file.
 - **Exit code:** `rm-q:delete` exits with a failure code when a file used up its attempts. Use `->onFailure()` or
   `->emailOutputOnFailure()` on the schedule to get alerted.
@@ -218,6 +248,7 @@ when called inside a transaction on the rm-q connection, since that transaction'
 | `connection` | `env('RM_Q_CONNECTION')` | Connection of the rm-q table: the one your transactions use. Null means the default connection. Read by the migration: changing it after migrating needs a migration of your own. |
 | `table` | `rm_q_files` | Name of the rm-q table. Read by the migration: changing it after migrating needs a migration of your own. |
 | `after` | `env('RM_Q_AFTER')`, 1 day when unset | Grace period, in seconds, before `rm-q:delete` deletes a staged file. An invalid value logs a warning and uses 1 day. |
+| `paused` | `env('RM_Q_PAUSED', false)` | Stops every deletion. See [Pausing](#pausing). |
 | `chunk` | `500` | Rows read and processed per batch. |
 | `max_attempts` | `5` | Attempts before a failed deletion is given up. |
 | `backoff` | `[900, 3600, 21600, 86400]` | Seconds to wait before attempting a failed deletion again; the last delay repeats. By default, a file gives up about 31 hours after its first failure. |
