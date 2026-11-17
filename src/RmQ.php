@@ -16,6 +16,7 @@ use Medilies\RmQ\Events\FileDeletionFailed;
 use Medilies\RmQ\Events\StagedFilesProcessed;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Models\RmqFile;
+use Medilies\RmQ\Support\GracePeriod;
 use Medilies\RmQ\Support\Paths;
 use Stringable;
 use Throwable;
@@ -56,7 +57,7 @@ class RmQ
     /**
      * Delete the files whose grace period is over, oldest first, retrying the failures that have attempts left.
      *
-     * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after`.
+     * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after` (1 day when invalid).
      * @param  int|null  $limit  Maximum number of files to process.
      *
      * @throws RmqException When called inside a transaction, or with invalid arguments or config.
@@ -133,7 +134,7 @@ class RmQ
     /**
      * How many files deleteAll() would process right now.
      *
-     * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after`.
+     * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after` (1 day when invalid).
      *
      * @throws RmqException With invalid arguments or config.
      */
@@ -149,7 +150,7 @@ class RmQ
             throw RmqException::invalidArgument('after', 'an integer greater than or equal to 0');
         }
 
-        return Date::now()->subSeconds($after ?? $this->setting('after', 0));
+        return Date::now()->subSeconds($after ?? GracePeriod::fromConfig()->seconds);
     }
 
     /**
@@ -233,12 +234,16 @@ class RmQ
             : null; // Removed concurrently.
     }
 
-    /** An integer `rm-q` setting of at least $min. */
+    /** An integer `rm-q` setting of at least $min; numeric strings are accepted. */
     private function setting(string $key, int $min): int
     {
-        $value = Config::integer("rm-q.{$key}");
+        $value = Config::get("rm-q.{$key}");
 
-        if ($value < $min) {
+        if (is_string($value) && ctype_digit($value)) {
+            $value = (int) $value;
+        }
+
+        if (! is_int($value) || $value < $min) {
             throw RmqException::invalidConfig("rm-q.{$key}", "an integer greater than or equal to {$min}");
         }
 

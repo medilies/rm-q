@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
 use InvalidArgumentException;
 use Medilies\RmQ\Facades\RmQ;
+use Medilies\RmQ\Support\GracePeriod;
 
 class RmqDeleteCommand extends Command implements Isolatable
 {
@@ -25,6 +26,15 @@ class RmqDeleteCommand extends Command implements Isolatable
             $this->components->error($e->getMessage());
 
             return self::INVALID;
+        }
+
+        if ($after === null) {
+            $gracePeriod = GracePeriod::fromConfig();
+            $after = $gracePeriod->seconds;
+
+            if ($gracePeriod->warning !== null) {
+                $this->components->warn($gracePeriod->warning);
+            }
         }
 
         if ($this->option('dry-run')) {

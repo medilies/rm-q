@@ -213,7 +213,7 @@ when called inside a transaction on the rm-q connection, since that transaction'
 | --- | --- | --- |
 | `connection` | `env('RM_Q_CONNECTION')` | Connection of the rm-q table: the one your transactions use. Null means the default connection. |
 | `table` | `rm_q_files` | Name of the rm-q table. |
-| `after` | `env('RM_Q_AFTER', 86400)` | Grace period, in seconds, before `rm-q:delete` deletes a staged file. |
+| `after` | `env('RM_Q_AFTER')`, 1 day when unset | Grace period, in seconds, before `rm-q:delete` deletes a staged file. An invalid value logs a warning and uses 1 day. |
 | `chunk` | `500` | Rows read and processed per batch. |
 | `max_attempts` | `3` | Attempts before a failed deletion is given up. |
 | `allowed_directories` | `null` | Absolute directories that local paths must be in. Null means no restriction. |

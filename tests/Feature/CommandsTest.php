@@ -52,6 +52,17 @@ describe('rm-q:delete', function () {
         'zero limit' => [['--limit' => '0'], 'The --limit option must be an integer greater than or equal to 1.'],
     ]);
 
+    it('warns when the grace period config is invalid', function (array $options) {
+        config(['rm-q.after' => '1d']);
+
+        $this->artisan('rm-q:delete', $options)
+            ->expectsOutputToContain('rm-q.after must be a non-negative integer of seconds, got "1d"')
+            ->assertSuccessful();
+    })->with([
+        'delete' => [[]],
+        'dry run' => [['--dry-run' => true]],
+    ]);
+
     it('fails when a file used up its attempts', function () {
         config(['rm-q.max_attempts' => 1]);
         brokenDisk('Access Denied');

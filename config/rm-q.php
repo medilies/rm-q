@@ -11,9 +11,10 @@ return [
 
     /*
      * Grace period, in seconds, before `rm-q:delete` / RmQ::deleteAll() deletes a staged file: time to notice a bug
-     * or restore a database backup before the files are gone. Default: 1 day.
+     * or restore a database backup before the files are gone. Default: 1 day, also used, with a logged warning, when
+     * the value is not a non-negative integer.
      */
-    'after' => (int) env('RM_Q_AFTER', 60 * 60 * 24),
+    'after' => env('RM_Q_AFTER'),
 
     /* Rows read and processed per batch. */
     'chunk' => 500,

@@ -3,6 +3,7 @@
 use Illuminate\Contracts\Filesystem\Filesystem as FilesystemContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\DeletionReport;
 use Medilies\RmQ\Events\StagedFilesProcessed;
@@ -39,14 +40,66 @@ it('takes the grace period as an argument', function () {
         ->and($file)->not->toBeFile();
 });
 
+it('reads the grace period from a numeric string', function (string $after, int $staleness, bool $deleted) {
+    config(['rm-q.after' => $after]);
+    $this->freezeTime();
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+    $this->travel($staleness)->seconds();
+
+    expect(RmQ::deleteAll()->deleted)->toBe((int) $deleted);
+})->with([
+    'zero' => ['0', 0, true],
+    'not over' => ['3600', 3599, false],
+    'over' => ['3600', 3600, true],
+]);
+
+it('falls back to one day for an invalid grace period', function (mixed $after, string $rejected) {
+    Log::spy();
+    config(['rm-q.after' => $after]);
+    $this->freezeTime();
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+
+    $this->travel(86399)->seconds();
+    expect(RmQ::countDeletable())->toBe(0);
+
+    $this->travel(1)->seconds();
+    expect(RmQ::deleteAll()->deleted)->toBe(1);
+
+    Log::shouldHaveReceived('warning')->twice()->with(
+        "rm-q.after must be a non-negative integer of seconds, got {$rejected}; using the default of 86400 (1 day).",
+    );
+})->with([
+    'blank' => ['', '""'],
+    'unit suffix' => ['24h', '"24h"'],
+    'negative string' => ['-5', '"-5"'],
+    'negative integer' => [-1, '-1'],
+    'float' => [60.0, '60.0'],
+]);
+
+it('uses one day silently when the grace period is not set', function () {
+    Log::spy();
+    config(['rm-q.after' => null]);
+    $this->freezeTime();
+    RmQ::stage($this->temporaryFile());
+
+    $this->travel(86399)->seconds();
+    expect(RmQ::countDeletable())->toBe(0);
+
+    $this->travel(1)->seconds();
+    expect(RmQ::countDeletable())->toBe(1);
+
+    Log::shouldNotHaveReceived('warning');
+});
+
 it('rejects invalid config and arguments', function (array $config, array $arguments, string $exception, string $message) {
     config($config);
 
     expect(fn () => RmQ::deleteAll(...$arguments))->toThrow($exception, $message);
 })->with([
-    'after config not an integer' => [['rm-q.after' => 'one day'], [], InvalidArgumentException::class, 'rm-q.after'],
-    'negative after config' => [['rm-q.after' => -1], [], RmqException::class, 'rm-q.after'],
     'chunk config' => [['rm-q.chunk' => 0], [], RmqException::class, 'rm-q.chunk'],
+    'chunk config not an integer' => [['rm-q.chunk' => '500 rows'], [], RmqException::class, 'rm-q.chunk'],
     'max_attempts config' => [['rm-q.max_attempts' => 0], [], RmqException::class, 'rm-q.max_attempts'],
     'negative after' => [[], ['after' => -1], RmqException::class, '[after]'],
     'limit' => [[], ['limit' => 0], RmqException::class, '[limit]'],
