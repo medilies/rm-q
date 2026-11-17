@@ -2,10 +2,10 @@
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Str;
 use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
-use Symfony\Component\Uid\Ulid;
 
 describe('rm-q:delete', function () {
     it('deletes staged files past the grace period', function () {
@@ -46,7 +46,7 @@ describe('rm-q:delete', function () {
         stagedRow($file, ['staged_at' => now()->subDays(2)]);
         stagedRow('/tmp/abandoned.txt', [
             'status' => Status::Processing->value,
-            'claimed_by' => (string) new Ulid,
+            'claimed_by' => (string) Str::ulid(),
             'claimed_at' => now()->subDay(),
             'attempts' => 1,
         ]);
@@ -124,7 +124,7 @@ describe('rm-q:cleanup', function () {
         foreach (array_chunk(range(1, 2500), 100) as $chunk) {
             RmqFile::query()->insert(array_map(fn (int $i) => [
                 'path' => "/tmp/{$i}.txt",
-                'instance' => (string) new Ulid,
+                'instance' => (string) Str::ulid(),
                 'status' => Status::Deleted->value,
                 'attempts' => 1,
                 'staged_at' => $processedAt,

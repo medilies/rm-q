@@ -15,9 +15,4 @@ enum Status: int
 
     /** Claimed by a sweep; reclaimed after `rm-q.claim_timeout` if that sweep died. */
     case Processing = 3;
-
-    public function label(): string
-    {
-        return $this->name;
-    }
 }

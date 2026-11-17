@@ -2,6 +2,7 @@
 
 namespace Medilies\RmQ\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Medilies\RmQ\Enums\Status;
@@ -36,11 +37,6 @@ final class RmqFile extends Model
      */
     protected $guarded = ['id'];
 
-    public static function tableName(): string
-    {
-        return Settings::table();
-    }
-
     public function getTable(): string
     {
         return Settings::table();
@@ -49,6 +45,17 @@ final class RmqFile extends Model
     public function getConnectionName(): ?string
     {
         return Settings::connection();
+    }
+
+    /**
+     * Failed rows that used up their attempts: only `rm-q:retry` brings them back.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeGaveUp(Builder $query): void
+    {
+        $query->where('status', Status::Failed->value)
+            ->where('attempts', '>=', Settings::int('max_attempts', 1));
     }
 
     /** @return array<string, string> */

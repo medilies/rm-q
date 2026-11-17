@@ -21,8 +21,8 @@ beforeEach(function () {
 it('stages on the configured connection', function () {
     RmQ::stage($this->temporaryFile());
 
-    expect(DB::connection('rmq')->table(RmqFile::tableName())->count())->toBe(1)
-        ->and(DB::connection()->table(RmqFile::tableName())->count())->toBe(0);
+    expect(DB::connection('rmq')->table((new RmqFile)->getTable())->count())->toBe(1)
+        ->and(DB::connection()->table((new RmqFile)->getTable())->count())->toBe(0);
 });
 
 it('runs RmQ::transaction() on the configured connection', function () {
@@ -36,7 +36,7 @@ it('runs RmQ::transaction() on the configured connection', function () {
         throw new RuntimeException('Rolled back');
     }))->toThrow(RuntimeException::class);
 
-    expect(DB::connection('rmq')->table(RmqFile::tableName())->count())->toBe(0);
+    expect(DB::connection('rmq')->table((new RmqFile)->getTable())->count())->toBe(0);
 });
 
 it('cannot roll back with a transaction on another connection', function () {
@@ -47,7 +47,16 @@ it('cannot roll back with a transaction on another connection', function () {
         throw new RuntimeException('Rolled back');
     }))->toThrow(RuntimeException::class);
 
-    expect(DB::connection('rmq')->table(RmqFile::tableName())->count())->toBe(1);
+    expect(DB::connection('rmq')->table((new RmqFile)->getTable())->count())->toBe(1);
+});
+
+it('runs deleteAll() while another connection has a transaction open', function () {
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+
+    $report = DB::connection()->transaction(fn () => RmQ::deleteAll(after: 0));
+
+    expect($report->deleted())->toBe(1);
 });
 
 it('deletes through the configured connection', function () {

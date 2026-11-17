@@ -6,7 +6,7 @@ use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
 it('indexes the columns the sweeps filter on', function () {
-    $indexes = collect(Schema::getIndexes(RmqFile::tableName()))->pluck('columns')->all();
+    $indexes = collect(Schema::getIndexes((new RmqFile)->getTable()))->pluck('columns')->all();
 
     expect($indexes)->toContain(['status', 'staged_at'], ['instance', 'status']);
 });

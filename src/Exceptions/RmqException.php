@@ -28,6 +28,6 @@ class RmqException extends Exception
 
     public static function insideTransaction(): self
     {
-        return new self('RmQ::deleteAll() cannot run inside a database transaction: it could delete files whose staging may still roll back.');
+        return new self('RmQ::deleteAll() cannot run inside a transaction on the rm-q connection: it could delete files whose staging may still roll back.');
     }
 }

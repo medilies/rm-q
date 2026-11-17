@@ -12,6 +12,12 @@ use function Orchestra\Testbench\load_migration_paths;
 
 abstract class TestCase extends Orchestra
 {
+    /**
+     * Never load the testbench skeleton's .env: concurrent `vendor/bin/testbench` processes can leave theirs behind
+     * (DB_CONNECTION=sqlite, CACHE_STORE=database), which would switch every later test to another database.
+     */
+    protected $loadEnvironmentVariables = false;
+
     /** @var list<string> */
     private array $temporaryDirectories = [];
 

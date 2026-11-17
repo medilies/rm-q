@@ -62,7 +62,7 @@ picked up later by the `rm-q:delete` command.
 
 Requirements:
 
-- PHP 8.2+ and Laravel 12 or 13.
+- PHP 8.3+ and Laravel 12 or 13.
 - SQLite, MySQL, MariaDB or PostgreSQL. CI runs the test suite on SQLite, MySQL 8.4, MariaDB 11.4 and
   PostgreSQL 17. SQL Server is not tested.
 
@@ -244,7 +244,7 @@ See [Commands](#commands).
 | `after` | `env('RM_Q_AFTER', 86400)` | Grace period, in seconds, before `rm-q:delete` deletes a staged file. |
 | `chunk` | `500` | Rows claimed and processed per batch. |
 | `max_attempts` | `3` | Attempts before a failed deletion is given up. |
-| `claim_timeout` | `3600` | Seconds after which the rows of a crashed run are taken back. |
+| `claim_timeout` | `3600` | Seconds after which the rows of a crashed run are taken back. Keep it above the time one `chunk` takes. |
 | `cleanup_after_days` | `30` | How long `rm-q:cleanup` keeps processed rows, in days. |
 | `allowed_directories` | `null` | Absolute directories that local paths must be in. Null means no restriction. |
 

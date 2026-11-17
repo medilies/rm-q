@@ -26,12 +26,6 @@ class RmqServiceProvider extends ServiceProvider
             $router->aliasMiddleware('rm-q', RmqMiddleware::class);
         });
 
-        $this->registerPublishing();
-        $this->registerCommands();
-    }
-
-    protected function registerPublishing(): void
-    {
         if (! $this->app->runningInConsole()) {
             return;
         }
@@ -43,13 +37,6 @@ class RmqServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../config/rm-q.php' => config_path('rm-q.php'),
         ], 'rm-q-config');
-    }
-
-    protected function registerCommands(): void
-    {
-        if (! $this->app->runningInConsole()) {
-            return;
-        }
 
         $this->commands([
             RmqDeleteCommand::class,
