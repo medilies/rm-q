@@ -37,7 +37,7 @@ function stagedRow(string $path, array $attributes = []): RmqFile
 {
     $id = RmqFile::query()->insertGetId([
         'path' => $path,
-        'disk' => null,
+        'disk' => config('filesystems.default'),
         'staged_at' => Date::now(),
         ...$attributes,
     ]);

@@ -2,6 +2,7 @@
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
@@ -16,8 +17,8 @@ describe('rm-q:delete', function () {
             ->expectsOutputToContain('Processed 1 staged file(s)')
             ->assertSuccessful();
 
-        expect($old)->not->toBeFile()
-            ->and($recent)->toBeFile();
+        expect(Storage::path($old))->not->toBeFile()
+            ->and(Storage::path($recent))->toBeFile();
     });
 
     it('takes the grace period and a limit as options', function () {
@@ -38,7 +39,7 @@ describe('rm-q:delete', function () {
             ->expectsOutputToContain('Would process 2 staged file(s).')
             ->assertSuccessful();
 
-        expect($file)->toBeFile()
+        expect(Storage::path($file))->toBeFile()
             ->and(RmqFile::query()->sum('attempts'))->toEqual(1);
     });
 

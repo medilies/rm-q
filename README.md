@@ -112,7 +112,8 @@ stateDiagram-v2
 ```
 
 - `rm-q:delete` deletes the files staged longer ago than the grace period, oldest first, and removes their rows. A file
-  that was already missing counts as deleted.
+  that was already missing counts as deleted, unless its storage may be unavailable: see
+  [Network storage](#network-storage).
 - A failed deletion keeps its row, with the error, and each later run retries it until it has used up
   `rm-q.max_attempts` attempts.
 - An attempt counts before the file is deleted, so a file whose deletion crashes the run is given up too.
@@ -122,20 +123,20 @@ stateDiagram-v2
 ```php
 use Medilies\RmQ\Facades\RmQ;
 
-RmQ::stage('/var/www/storage/app/exports/report.csv'); // an absolute local path
-RmQ::stage(['avatars/1.jpg', 'avatars/2.jpg'], 's3');  // paths on a disk
+RmQ::stage('exports/report.csv');                     // a path on the default disk
+RmQ::stage(['avatars/1.jpg', 'avatars/2.jpg'], 's3'); // paths on the s3 disk
 ```
 
 - **What it accepts:** a string, a `Stringable`, or any iterable (array, collection, generator). It returns the
   number of paths staged; duplicates are staged once.
-- **Paths:** without a disk, paths must be absolute. With a disk, they are paths on that disk, and the disk must be
-  configured.
+- **Disks:** every staged file is on a configured disk. Without a disk, `filesystems.default` is used, and stored by
+  name: changing the default later doesn't move files already staged. For files outside your disks, add a `local`
+  disk rooted at their directory.
 - **Validation:** invalid paths throw `Medilies\RmQ\Exceptions\RmqException` before anything is staged. That covers
   empty paths, NUL bytes, stream wrappers (`phar://`, ...) and `..` segments. Inside a transaction, the exception
   aborts your change instead of leaking a file.
 - **Batching:** each call is one insert (split into chunks for long lists), so stage arrays rather than looping over
   single paths.
-- **Restricting local paths:** set `rm-q.allowed_directories` to the directories that local paths must be in.
 
 ### Transactions
 
@@ -156,7 +157,7 @@ class Image extends Model
 {
     use StagesFilesOnDelete;
 
-    /** Columns holding file paths, mapped to their disk. A null disk means absolute local paths. */
+    /** Columns holding file paths, mapped to their disk. A null disk means the default disk. */
     public function rmqFileColumns(): array
     {
         return ['path' => 'public', 'thumbnail_path' => 's3'];
@@ -216,7 +217,6 @@ when called inside a transaction on the rm-q connection, since that transaction'
 | `after` | `env('RM_Q_AFTER')`, 1 day when unset | Grace period, in seconds, before `rm-q:delete` deletes a staged file. An invalid value logs a warning and uses 1 day. |
 | `chunk` | `500` | Rows read and processed per batch. |
 | `max_attempts` | `3` | Attempts before a failed deletion is given up. |
-| `allowed_directories` | `null` | Absolute directories that local paths must be in. Null means no restriction. |
 
 ## Things to know
 
@@ -224,14 +224,28 @@ when called inside a transaction on the rm-q connection, since that transaction'
   deleted for all of them.
 - **Reused paths:** if a file name doesn't change between versions (`avatars/{user_id}.jpg`), a new file uploaded
   at that path before the deletion runs will be deleted.
-- **User input:** never stage paths that come from user input without validating them. `allowed_directories` adds a
-  safety net for local paths.
+- **User input:** never stage paths that come from user input without validating them. Paths can't leave their disk
+  through `..` segments, but on a local disk a symlinked directory is followed.
 - **Multi-tenancy:** disks are resolved when the files are deleted. With per-tenant disks, run `rm-q:delete` once
   per tenant.
 - **Versioned S3 buckets:** deleting an object only adds a delete marker. Use lifecycle rules to remove old
   versions.
 - **Tests:** `RmQ::deleteAll(after: 0)` deletes what the test staged, also in tests using `RefreshDatabase`. Stage
-  files on a disk faked with `Storage::fake()`, or in temporary files.
+  files on a disk faked with `Storage::fake()`.
+
+### Network storage
+
+On a local disk, an NFS or SMB mount that is down, or a volume not mounted yet, makes files look missing. So a
+missing file counts as deleted only when the disk root and the file's directory exist. Otherwise the attempt fails
+with "the storage may be unavailable", and is retried like any failure. Other disks, like S3, have no directories of
+their own: a missing file there always counts as deleted.
+
+- **Set `'lazy_root_creation' => true`** on disks backed by a mount. Otherwise Laravel recreates a missing disk root
+  when it resolves the disk, possibly on the bare mount point, and files right in the root then count as deleted.
+- **Point the disk root at a subdirectory of the mount**, not at the mount point itself: an unmounted mount point is
+  an empty directory that exists.
+- **Don't delete the directories of staged files yourself.** Their files would fail until they give up. Stage the
+  files instead, or delete their rows: `RmqFile::query()->where('path', 'like', 'users/5/%')->delete()`.
 
 ## Changelog
 

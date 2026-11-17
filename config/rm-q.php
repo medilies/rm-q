@@ -21,10 +21,4 @@ return [
 
     /* A failed deletion is retried by `rm-q:delete` until it reaches this many attempts. */
     'max_attempts' => 3,
-
-    /*
-     * Optional allowlist of absolute directories that files staged without a disk must live in.
-     * Null means no restriction.
-     */
-    'allowed_directories' => null,
 ];

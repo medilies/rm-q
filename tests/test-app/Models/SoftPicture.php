@@ -13,7 +13,7 @@ class SoftPicture extends Model
 
     protected $guarded = [];
 
-    /** @return array<string, ?string> */
+    /** @return array<string, ?string> Null: the default disk. */
     public function rmqFileColumns(): array
     {
         return ['path' => null];

@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
@@ -33,5 +34,5 @@ it('runs deleteAll() outside of a transaction', function () {
     RmQ::stage($file);
 
     expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
-        ->and($file)->not->toBeFile();
+        ->and(Storage::path($file))->not->toBeFile();
 });

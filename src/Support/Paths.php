@@ -9,6 +9,29 @@ use Stringable;
 /** @internal */
 final class Paths
 {
+    /** Scoped disks over scoped disks: deeper chains are not treated as local. */
+    private const int MAX_SCOPE_DEPTH = 10;
+
+    /**
+     * The configured disk files are staged on: the given one, or `filesystems.default`.
+     *
+     * @throws RmqException
+     */
+    public static function disk(?string $disk): string
+    {
+        $disk ??= Config::get('filesystems.default');
+
+        if (! is_string($disk) || $disk === '') {
+            throw RmqException::invalidConfig('filesystems.default', 'a disk name');
+        }
+
+        if (! is_array(self::diskConfig($disk))) {
+            throw RmqException::unknownDisk($disk);
+        }
+
+        return $disk;
+    }
+
     /**
      * Validate and de-duplicate paths before staging them.
      *
@@ -17,12 +40,8 @@ final class Paths
      *
      * @throws RmqException
      */
-    public static function normalize(string|Stringable|iterable $paths, ?string $disk): array
+    public static function normalize(string|Stringable|iterable $paths): array
     {
-        if ($disk !== null && ! self::diskExists($disk)) {
-            throw RmqException::unknownDisk($disk);
-        }
-
         $normalized = [];
 
         foreach (is_iterable($paths) ? $paths : [$paths] as $path) {
@@ -34,7 +53,7 @@ final class Paths
                 throw RmqException::invalidPath(get_debug_type($path), 'must be a string');
             }
 
-            $violation = self::violation($path, $disk);
+            $violation = self::violation($path);
 
             if ($violation !== null) {
                 throw RmqException::invalidPath($path, $violation);
@@ -51,71 +70,41 @@ final class Paths
      * Why a path must not be deleted, or null when it may be. Also checked again right before deleting,
      * since rows can be inserted by other means than RmQ::stage().
      */
-    public static function violation(string $path, ?string $disk): ?string
+    public static function violation(string $path): ?string
     {
         return match (true) {
             $path === '' => 'must not be empty',
             str_contains($path, "\0") => 'must not contain NUL bytes',
             preg_match('~^[a-z][a-z0-9+.\-]*://~i', $path) === 1 => 'must not use a stream wrapper',
             preg_match('~(^|[/\\\\])\.\.([/\\\\]|$)~', $path) === 1 => 'must not contain ".." segments',
-            $disk !== null => null,
-            ! self::isAbsolute($path) => 'must be absolute when no disk is given',
-            ! self::isAllowed($path) => 'must be inside one of the rm-q.allowed_directories',
             default => null,
         };
     }
 
-    public static function isAbsolute(string $path): bool
+    /**
+     * Whether the disk is configured with the `local` driver, or `scoped` over such a disk. The configured driver,
+     * not the resolved one: a disk faked with Storage::fake() keeps the semantics of the driver it stands in for.
+     */
+    public static function isLocalDisk(string $disk): bool
     {
-        return str_starts_with($path, '/')
-            || str_starts_with($path, '\\\\') // UNC: \\host\share
-            || preg_match('~^[A-Za-z]:[/\\\\]~', $path) === 1;
-    }
+        $config = self::diskConfig($disk);
 
-    private static function isAllowed(string $path): bool
-    {
-        $directories = Config::get('rm-q.allowed_directories');
-
-        if ($directories === null) {
-            return true;
-        }
-
-        if (! is_array($directories)) {
-            throw RmqException::invalidConfig('rm-q.allowed_directories', 'null or a list of absolute directories');
-        }
-
-        // unlink() follows symlinked directories, so compare where the parent directory really is. The file itself
-        // may be a symlink: unlink() only removes the link. A missing parent means there is nothing to delete, and
-        // the lexical path is sound because ".." segments are rejected before this check.
-        $parent = realpath(dirname($path));
-        $path = self::comparable(rtrim($parent === false ? dirname($path) : $parent, '/\\').'/'.basename($path));
-
-        foreach ($directories as $directory) {
-            if (! is_string($directory) || ! self::isAbsolute($directory)) {
-                throw RmqException::invalidConfig('rm-q.allowed_directories', 'null or a list of absolute directories');
+        for ($depth = 0; is_array($config) && $depth < self::MAX_SCOPE_DEPTH; $depth++) {
+            if (($config['driver'] ?? null) !== 'scoped') {
+                return ($config['driver'] ?? null) === 'local';
             }
 
-            $root = realpath($directory);
-
-            if (str_starts_with($path, rtrim(self::comparable($root === false ? $directory : $root), '/').'/')) {
-                return true;
-            }
+            $parent = $config['disk'] ?? null;
+            $config = is_string($parent) ? self::diskConfig($parent) : $parent;
         }
 
         return false;
     }
 
-    private static function comparable(string $path): string
-    {
-        $path = str_replace('\\', '/', $path);
-
-        return PHP_OS_FAMILY === 'Windows' ? strtolower($path) : $path;
-    }
-
-    private static function diskExists(string $disk): bool
+    private static function diskConfig(string $disk): mixed
     {
         $disks = Config::get('filesystems.disks');
 
-        return is_array($disks) && is_array($disks[$disk] ?? null);
+        return is_array($disks) ? $disks[$disk] ?? null : null;
     }
 }

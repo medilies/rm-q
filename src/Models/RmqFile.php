@@ -13,7 +13,7 @@ use Medilies\RmQ\Exceptions\RmqException;
  *
  * @property int $id
  * @property string $path
- * @property ?string $disk
+ * @property string $disk
  * @property Carbon $staged_at
  * @property int $attempts
  * @property ?string $error

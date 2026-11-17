@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
@@ -22,11 +23,11 @@ it('stages the files of a deleted model', function () {
 
     expect(RmqFile::query()->sole())
         ->path->toBe($file)
-        ->disk->toBeNull();
+        ->disk->toBe('temp');
 
     RmQ::deleteAll(after: 0);
 
-    expect($file)->not->toBeFile();
+    expect(Storage::path($file))->not->toBeFile();
 });
 
 it('skips empty path columns', function (?string $path) {
@@ -103,9 +104,9 @@ it('reads the path columns a partial select left out', function () {
 });
 
 it('refuses to delete a model whose path is invalid', function () {
-    $picture = Picture::query()->create(['path' => 'relative/file.txt']);
+    $picture = Picture::query()->create(['path' => '../file.txt']);
 
-    expect(fn () => $picture->delete())->toThrow(RmqException::class, 'must be absolute');
+    expect(fn () => $picture->delete())->toThrow(RmqException::class, 'must not contain ".." segments');
 
     expect(Picture::query()->count())->toBe(1)
         ->and(RmqFile::query()->count())->toBe(0);

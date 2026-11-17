@@ -6,7 +6,7 @@ use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
-it('stages one row per path', function () {
+it('stages one row per path, on the default disk', function () {
     $files = $this->temporaryFiles(2);
 
     expect(RmQ::stage($files))->toBe(2);
@@ -18,11 +18,11 @@ it('stages one row per path', function () {
             fn ($row) => $row->path->toBe($files[1]),
         )
         ->each(fn ($row) => $row
-            ->disk->toBeNull()
+            ->disk->toBe('temp')
             ->attempts->toBe(0)
             ->error->toBeNull());
 
-    expect($files[0])->toBeFile()->and($files[1])->toBeFile();
+    Storage::assertExists($files);
 });
 
 it('accepts a string, a Stringable, collections and generators', function () {
@@ -62,77 +62,40 @@ it('rejects invalid paths and stages nothing', function (mixed $paths, string $m
         ->and(RmqFile::query()->count())->toBe(0);
 })->with([
     'empty' => ['', 'must not be empty'],
-    'relative without a disk' => ['storage/app/file.txt', 'must be absolute when no disk is given'],
-    'parent segment' => ['/var/www/storage/../.env', 'must not contain ".." segments'],
-    'parent segment, Windows' => ['C:\\www\\..\\secret.txt', 'must not contain ".." segments'],
-    'NUL byte' => ["/tmp/file\0.txt", 'must not contain NUL bytes'],
+    'parent segment' => ['storage/../.env', 'must not contain ".." segments'],
+    'parent segment, backslashes' => ['www\\..\\secret.txt', 'must not contain ".." segments'],
+    'NUL byte' => ["file\0.txt", 'must not contain NUL bytes'],
     'stream wrapper' => ['phar:///tmp/archive.phar/file.txt', 'must not use a stream wrapper'],
     'not a string' => [[123], 'must be a string'],
     'null in a list' => [[null], 'must be a string'],
-    'one bad path among good ones' => [['/tmp/fine.txt', ''], 'must not be empty'],
-]);
-
-it('accepts Windows absolute paths', function (string $path) {
-    expect(RmQ::stage($path))->toBe(1);
-})->with([
-    'drive' => 'C:\\Users\\app\\file.txt',
-    'drive, forward slashes' => 'C:/Users/app/file.txt',
-    'UNC' => '\\\\server\\share\\file.txt',
+    'one bad path among good ones' => [['fine.txt', ''], 'must not be empty'],
 ]);
 
 it('rejects unknown disks', function () {
     expect(fn () => RmQ::stage('file.txt', 'nope'))->toThrow(RmqException::class, 'disk [nope]: the disk is not configured');
 });
 
-it('accepts relative paths on a disk', function () {
-    Storage::fake('s3');
-
-    expect(RmQ::stage('relative/file.txt', 's3'))->toBe(1);
-});
-
-it('only stages local paths inside the allowed directories', function () {
-    $allowed = $this->temporaryDirectory();
-    $outside = $this->temporaryFile();
-
-    config(['rm-q.allowed_directories' => [$allowed]]);
-
-    expect(RmQ::stage($allowed.DIRECTORY_SEPARATOR.'file.txt'))->toBe(1)
-        ->and(fn () => RmQ::stage($outside))->toThrow(RmqException::class, 'allowed_directories')
-        // A sibling sharing the prefix is not inside the directory.
-        ->and(fn () => RmQ::stage($allowed.'-evil'.DIRECTORY_SEPARATOR.'file.txt'))->toThrow(RmqException::class, 'allowed_directories');
-});
-
-it('does not let a symlinked directory escape the allowed directories', function () {
-    $allowed = $this->temporaryDirectory();
-    $outside = $this->temporaryDirectory();
-    file_put_contents($outside.DIRECTORY_SEPARATOR.'secret.txt', 'secret');
-    symlink($outside, $allowed.DIRECTORY_SEPARATOR.'link');
-    config(['rm-q.allowed_directories' => [$allowed]]);
-
-    expect(fn () => RmQ::stage($allowed.DIRECTORY_SEPARATOR.'link'.DIRECTORY_SEPARATOR.'secret.txt'))
-        ->toThrow(RmqException::class, 'allowed_directories');
-})->skipOnWindows();
-
-it('resolves allowed directories that are symlinks', function () {
-    $real = $this->temporaryDirectory();
-    $alias = $this->temporaryDirectory().DIRECTORY_SEPARATOR.'alias';
-    symlink($real, $alias);
-    config(['rm-q.allowed_directories' => [$alias]]);
-
-    expect(RmQ::stage($real.DIRECTORY_SEPARATOR.'file.txt'))->toBe(1)
-        ->and(RmQ::stage($alias.DIRECTORY_SEPARATOR.'other.txt'))->toBe(1);
-})->skipOnWindows();
-
 it('validates its config', function (array $config, string $exception, string $key) {
     config($config);
 
-    expect(fn () => RmQ::stage($this->temporaryFile()))->toThrow($exception, $key);
+    expect(fn () => RmQ::stage('file.txt'))->toThrow($exception, $key);
 })->with([
-    'relative allowed directory' => [['rm-q.allowed_directories' => ['relative/dir']], RmqException::class, 'rm-q.allowed_directories'],
-    'allowed directories not a list' => [['rm-q.allowed_directories' => '/tmp'], RmqException::class, 'rm-q.allowed_directories'],
+    'no default disk' => [['filesystems.default' => null], RmqException::class, 'filesystems.default'],
+    'unknown default disk' => [['filesystems.default' => 'nope'], RmqException::class, 'disk [nope]'],
     'connection not a name' => [['rm-q.connection' => ['mysql']], RmqException::class, 'rm-q.connection'],
     'table not a string' => [['rm-q.table' => null], InvalidArgumentException::class, 'rm-q.table'],
 ]);
+
+it('stores the default disk by name, so changing it later does not move staged files', function () {
+    config(['filesystems.disks.other' => ['driver' => 'local', 'root' => $this->temporaryDirectory()]]);
+    $file = $this->temporaryFile();
+    RmQ::stage($file);
+
+    config(['filesystems.default' => 'other']);
+    RmQ::deleteAll(after: 0);
+
+    Storage::disk('temp')->assertMissing($file);
+});
 
 it('stores the staging time from PHP, not from the database clock', function () {
     $this->travelTo(now()->subYears(5)->startOfSecond());

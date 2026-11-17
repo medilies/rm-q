@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
@@ -64,5 +65,5 @@ it('runs deleteAll() while another connection has a transaction open', function 
     $report = DB::connection()->transaction(fn () => RmQ::deleteAll(after: 0));
 
     expect($report->deleted)->toBe(1)
-        ->and($file)->not->toBeFile();
+        ->and(Storage::path($file))->not->toBeFile();
 });

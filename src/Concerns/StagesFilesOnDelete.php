@@ -41,14 +41,14 @@ trait StagesFilesOnDelete
             }
 
             foreach ($pathsByDisk as $disk => $paths) {
-                app(RmQ::class)->stage($paths, $disk === '' ? null : $disk);
+                app(RmQ::class)->stage($paths, $disk);
             }
         });
     }
 
     /**
-     * The columns holding file paths, mapped to their disk (`['avatar' => 's3']`). A null disk means absolute
-     * local paths.
+     * The columns holding file paths, mapped to their disk (`['avatar' => 's3']`). A null disk means
+     * `filesystems.default`.
      *
      * @return array<string, ?string>
      */
@@ -60,7 +60,7 @@ trait StagesFilesOnDelete
         return method_exists($model, 'isForceDeleting') && ! $model->isForceDeleting();
     }
 
-    /** @return array<string, list<string>> Paths keyed by disk ('' for local paths). */
+    /** @return array<string, list<string>> Paths keyed by disk. */
     private function rmqCollectPaths(): array
     {
         // On another connection, the staging would commit even if the deletion rolls back.
@@ -90,8 +90,8 @@ trait StagesFilesOnDelete
                 continue;
             }
 
-            foreach (Paths::normalize([$path], $disk) as $normalized) {
-                $pathsByDisk[$disk ?? ''][] = $normalized;
+            foreach (Paths::normalize([$path]) as $normalized) {
+                $pathsByDisk[Paths::disk($disk)][] = $normalized;
             }
         }
 
