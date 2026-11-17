@@ -235,8 +235,8 @@ it('reports failures through events and the log', function () {
         && $event->attempts === 1
         && $event->willRetry);
 
-    Event::assertDispatched(StagedFilesProcessed::class, fn (StagedFilesProcessed $event) => $event->report->failed === 1
-        && $event->report->deleted === 0);
+    Event::assertDispatched(StagedFilesProcessed::class, fn (StagedFilesProcessed $event) => $event->report->failed() === 1
+        && $event->report->deleted() === 0);
 
     Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message) => str_contains($message, '1 staged file(s) could not be deleted'));
 });

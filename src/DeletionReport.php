@@ -4,22 +4,43 @@ namespace Medilies\RmQ;
 
 final class DeletionReport
 {
-    /** Files deleted (or already missing) in this run. */
-    public int $deleted = 0;
+    private int $deleted = 0;
 
-    /** Files that could not be deleted in this run. */
-    public int $failed = 0;
+    private int $failed = 0;
 
-    /** Failures in this run that used up their last attempt; they won't be retried automatically. */
-    public int $exhausted = 0;
+    private int $exhausted = 0;
 
     /** @var list<array{path: string, disk: ?string, error: string}> */
-    public array $failureSample = [];
+    private array $failureSample = [];
 
     public function __construct(
         /** Maximum number of rows to process in this run; null = unlimited. */
         public readonly ?int $limit = null,
     ) {}
+
+    /** Files deleted (or already missing) in this run. */
+    public function deleted(): int
+    {
+        return $this->deleted;
+    }
+
+    /** Files that could not be deleted in this run. */
+    public function failed(): int
+    {
+        return $this->failed;
+    }
+
+    /** Failures in this run that used up their last attempt; they won't be retried automatically. */
+    public function exhausted(): int
+    {
+        return $this->exhausted;
+    }
+
+    /** @return list<array{path: string, disk: ?string, error: string}> The first 5 failures of this run. */
+    public function failureSample(): array
+    {
+        return $this->failureSample;
+    }
 
     public function processed(): int
     {
@@ -31,10 +52,16 @@ final class DeletionReport
         return $this->limit !== null && $this->processed() >= $this->limit;
     }
 
-    /** @internal */
+    /** @internal Only called while the limit isn't reached. */
     public function nextChunkSize(int $chunk): int
     {
-        return $this->limit === null ? $chunk : max(0, min($chunk, $this->limit - $this->processed()));
+        return $this->limit === null ? $chunk : min($chunk, $this->limit - $this->processed());
+    }
+
+    /** @internal */
+    public function recordDeleted(int $count): void
+    {
+        $this->deleted += $count;
     }
 
     /** @internal */

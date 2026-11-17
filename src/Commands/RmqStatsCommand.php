@@ -8,7 +8,6 @@ use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
-use Medilies\RmQ\Support\Settings;
 
 class RmqStatsCommand extends Command
 {
@@ -28,7 +27,7 @@ class RmqStatsCommand extends Command
             ->get() as $row) {
             $status = $this->toInt($row->status);
 
-            $statuses[Status::tryFrom($status)?->label() ?? "Unknown ({$status})"] = $this->toInt($row->aggregate);
+            $statuses[Status::tryFrom($status)->name ?? "Unknown ({$status})"] = $this->toInt($row->aggregate);
         }
 
         $oldestStaged = RmqFile::query()->where('status', Status::Staged->value)->min('staged_at');
@@ -36,13 +35,10 @@ class RmqStatsCommand extends Command
 
         $deletable = RmQ::countDeletable();
 
-        $gaveUp = RmqFile::query()
-            ->where('status', Status::Failed->value)
-            ->where('attempts', '>=', Settings::int('max_attempts', 1))
-            ->count();
+        $gaveUp = RmqFile::query()->gaveUp()->count();
 
         if ($this->option('json')) {
-            $this->line((string) json_encode([
+            $this->line(json_encode([
                 'statuses' => $statuses,
                 'total' => array_sum($statuses),
                 'oldest_staged_at' => $oldestStaged?->toIso8601String(),

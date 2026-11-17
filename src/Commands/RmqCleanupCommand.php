@@ -43,8 +43,7 @@ class RmqCleanupCommand extends Command
 
         if ($this->option('with-failed')) {
             $removed += $this->removeInChunks(fn () => RmqFile::query()
-                ->where('status', Status::Failed->value)
-                ->where('attempts', '>=', Settings::int('max_attempts', 1))
+                ->gaveUp()
                 ->where('processed_at', '<=', $cutoff));
         }
 

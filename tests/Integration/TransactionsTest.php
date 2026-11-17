@@ -54,6 +54,6 @@ it('runs deleteAll() outside of a transaction', function () {
     $file = $this->temporaryFile();
     RmQ::stage($file);
 
-    expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
+    expect(RmQ::deleteAll(after: 0)->deleted())->toBe(1)
         ->and($file)->not->toBeFile();
 });

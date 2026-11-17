@@ -46,15 +46,15 @@ class RmqDeleteCommand extends Command implements Isolatable
         $report = RmQ::deleteAll($after, $limit);
 
         $this->table(['Result', 'Count'], [
-            ['Deleted', $report->deleted],
-            ['Failed, will retry', $report->failed - $report->exhausted],
-            ['Failed, gave up', $report->exhausted],
+            ['Deleted', $report->deleted()],
+            ['Failed, will retry', $report->failed() - $report->exhausted()],
+            ['Failed, gave up', $report->exhausted()],
         ]);
 
         $this->components->info(sprintf('Processed %d staged file(s) in %.2fs.', $report->processed(), microtime(true) - $started));
 
-        if ($report->exhausted > 0) {
-            $this->components->error("{$report->exhausted} file(s) could not be deleted within the maximum attempts. Run rm-q:retry once the cause is fixed.");
+        if ($report->exhausted() > 0) {
+            $this->components->error("{$report->exhausted()} file(s) could not be deleted within the maximum attempts. Run rm-q:retry once the cause is fixed.");
 
             return self::FAILURE;
         }

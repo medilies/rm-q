@@ -23,7 +23,6 @@ use Medilies\RmQ\Support\Outcome;
 use Medilies\RmQ\Support\Paths;
 use Medilies\RmQ\Support\Settings;
 use Stringable;
-use Symfony\Component\Uid\Ulid;
 use Throwable;
 
 /**
@@ -51,7 +50,7 @@ class RmQ
     /** The event dispatcher and disks are resolved at call time, so fakes work whenever they're installed. */
     public function __construct()
     {
-        $this->instance = (string) new Ulid;
+        $this->instance = (string) Str::ulid();
     }
 
     public function instanceId(): string
@@ -244,7 +243,7 @@ class RmQ
      */
     private function sweep(Closure $eligible, DeletionReport $report): void
     {
-        $token = (string) new Ulid;
+        $token = (string) Str::ulid();
         $chunk = Settings::int('chunk', 1);
         $maxAttempts = Settings::int('max_attempts', 1);
 
@@ -308,7 +307,7 @@ class RmQ
                     ->where('claimed_by', $token)
                     ->update(['status' => Status::Deleted->value, 'processed_at' => $now, 'error' => null]));
 
-                $report->deleted += count($deleted);
+                $report->recordDeleted(count($deleted));
             }
 
             foreach ($failed as $error => $failedIds) {
@@ -413,10 +412,10 @@ class RmQ
 
     private function finish(DeletionReport $report): void
     {
-        if ($report->failed > 0) {
-            Log::warning("rm-q: {$report->failed} staged file(s) could not be deleted.", [
-                'exhausted' => $report->exhausted,
-                'sample' => $report->failureSample,
+        if ($report->failed() > 0) {
+            Log::warning("rm-q: {$report->failed()} staged file(s) could not be deleted.", [
+                'exhausted' => $report->exhausted(),
+                'sample' => $report->failureSample(),
             ]);
         }
 

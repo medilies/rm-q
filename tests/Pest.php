@@ -6,12 +6,12 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use League\Flysystem\FilesystemOperator;
 use League\Flysystem\Local\LocalFilesystemAdapter;
 use League\Flysystem\UnableToDeleteFile;
 use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Models\RmqFile;
-use Symfony\Component\Uid\Ulid;
 use Tests\IntegrationTestCase;
 use Tests\TestCase;
 
@@ -41,7 +41,7 @@ function stagedRow(string $path, array $attributes = []): RmqFile
     $id = RmqFile::query()->insertGetId([
         'path' => $path,
         'disk' => null,
-        'instance' => (string) new Ulid,
+        'instance' => (string) Str::ulid(),
         'status' => Status::Staged->value,
         'attempts' => 0,
         'staged_at' => Date::now(),
