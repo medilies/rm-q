@@ -59,7 +59,8 @@ class RmQ
     }
 
     /**
-     * Delete the files whose grace period is over, oldest first, retrying the failures that have attempts left.
+     * Delete the files whose grace period is over, oldest first, retrying the failures whose backoff is over and that
+     * have attempts left.
      *
      * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after` (1 day when invalid).
      * @param  int|null  $limit  Maximum number of files to process.
@@ -80,6 +81,7 @@ class RmQ
 
         $chunk = $this->setting('chunk', 1);
         $maxAttempts = $this->setting('max_attempts', 1);
+        $backoff = $this->backoff();
         $remaining = $limit ?? PHP_INT_MAX;
         $lastId = 0;
         $deleted = 0;
@@ -88,7 +90,7 @@ class RmQ
 
         while ($remaining > 0) {
             // The write connection: a lagging read replica could return rows that are already gone.
-            $files = $this->deletable(RmqFile::query()->useWritePdo(), $cutoff, $maxAttempts)
+            $files = $this->deletable(RmqFile::query()->useWritePdo(), $cutoff, $maxAttempts, Date::now('UTC'))
                 ->where('id', '>', $lastId)
                 ->orderBy('id')
                 ->limit(min($chunk, $remaining))
@@ -102,8 +104,17 @@ class RmQ
                 $lastId = $file->id;
                 $remaining--;
 
-                // Counted before deleting: a file whose deletion kills the run still uses up its attempts.
-                if (RmqFile::query()->whereKey($file->id)->increment('attempts') === 0) {
+                $attempts = $file->attempts + 1;
+                $nextAttemptAt = $attempts < $maxAttempts
+                    ? Date::now('UTC')->addSeconds($backoff[min($attempts, count($backoff)) - 1])
+                    : null;
+
+                // Counted before deleting: a file whose deletion kills the run still uses up an attempt, and waits.
+                $counted = RmqFile::query()
+                    ->whereKey($file->id)
+                    ->increment('attempts', 1, ['next_attempt_at' => $nextAttemptAt]);
+
+                if ($counted === 0) {
                     continue; // Removed meanwhile.
                 }
 
@@ -118,12 +129,17 @@ class RmQ
 
                 RmqFile::query()->whereKey($file->id)->update(['error' => $error]);
 
-                $attempts = $file->attempts + 1;
                 $failed++;
-                $exhausted += (int) ($attempts >= $maxAttempts);
+                $exhausted += (int) ($nextAttemptAt === null);
 
                 Event::dispatch(new FileDeletionFailed(
-                    $file->id, $file->path, $file->disk, $error, $attempts, $attempts < $maxAttempts,
+                    $file->id,
+                    $file->path,
+                    $file->disk,
+                    $error,
+                    $attempts,
+                    $nextAttemptAt !== null,
+                    $nextAttemptAt?->setTimezone(date_default_timezone_get()),
                 ));
             }
         }
@@ -144,7 +160,12 @@ class RmQ
      */
     public function countDeletable(?int $after = null): int
     {
-        return $this->deletable(RmqFile::query(), $this->cutoff($after), $this->setting('max_attempts', 1))->count();
+        return $this->deletable(
+            RmqFile::query(),
+            $this->cutoff($after),
+            $this->setting('max_attempts', 1),
+            Date::now('UTC'),
+        )->count();
     }
 
     /** Files staged at or before the cutoff, in UTC like `staged_at`, are past their grace period. */
@@ -158,16 +179,50 @@ class RmQ
     }
 
     /**
-     * Files whose grace period is over and that have attempts left.
+     * Files whose grace period and backoff are over, and that have attempts left.
      *
      * @param  Builder<RmqFile>  $query
      * @return Builder<RmqFile>
      */
-    private function deletable(Builder $query, CarbonInterface $cutoff, int $maxAttempts): Builder
+    private function deletable(Builder $query, CarbonInterface $cutoff, int $maxAttempts, CarbonInterface $now): Builder
     {
         return $query
             ->where('staged_at', '<=', $cutoff)
-            ->where('attempts', '<', $maxAttempts);
+            ->where('attempts', '<', $maxAttempts)
+            ->where(fn (Builder $query) => $query
+                ->whereNull('next_attempt_at')
+                ->orWhere('next_attempt_at', '<=', $now));
+    }
+
+    /**
+     * Seconds to wait after each failed attempt; the last delay repeats. Numeric strings are accepted.
+     *
+     * @return non-empty-list<int>
+     */
+    private function backoff(): array
+    {
+        $backoff = Config::get('rm-q.backoff');
+        $delays = [];
+
+        foreach (is_array($backoff) && array_is_list($backoff) ? $backoff : [] as $delay) {
+            if (is_string($delay) && ctype_digit($delay)) {
+                $delay = (int) $delay;
+            }
+
+            if (! is_int($delay) || $delay < 0) {
+                $delays = [];
+
+                break;
+            }
+
+            $delays[] = $delay;
+        }
+
+        if ($delays === []) {
+            throw RmqException::invalidConfig('rm-q.backoff', 'a non-empty list of seconds, each an integer greater than or equal to 0');
+        }
+
+        return $delays;
     }
 
     /** @return string|null Why the file could not be deleted, or null once it is gone. */

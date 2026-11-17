@@ -36,6 +36,9 @@ return new class extends Migration
             /* Counted before each deletion attempt. */
             $table->unsignedSmallInteger('attempts')->default(0);
 
+            /* UTC. Set with each attempt: not retried before then. Null until the first attempt. */
+            $table->dateTime('next_attempt_at')->nullable();
+
             /* Why the last attempt failed. */
             $table->text('error')->nullable();
         });

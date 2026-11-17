@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Medilies\RmQ\DeletionReport;
 use Medilies\RmQ\Events\StagedFilesProcessed;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
@@ -157,22 +156,88 @@ it('stops at the limit, oldest first', function () {
         ->and(RmqFile::query()->orderBy('id')->pluck('path')->all())->toBe(array_slice($files, 2));
 });
 
-it('retries a failure at each later run until it runs out of attempts', function () {
-    config(['rm-q.max_attempts' => 3]);
+it('retries a failure once its backoff is over, until it runs out of attempts', function () {
+    config(['rm-q.max_attempts' => 3, 'rm-q.backoff' => [900, 3600]]);
+    $this->freezeSecond();
     brokenDisk('Access Denied');
     RmQ::stage('file.txt', 'broken');
 
-    $runs = [];
+    $run = fn () => [RmQ::deleteAll(after: 0)->failed, RmqFile::query()->sole()->attempts];
 
-    for ($i = 0; $i < 4; $i++) {
-        $runs[] = RmQ::deleteAll(after: 0);
-    }
+    expect($run())->toBe([1, 1])
+        ->and($run())->toBe([0, 1]);
 
-    expect(array_map(fn (DeletionReport $report) => [$report->failed, $report->exhausted], $runs))
-        ->toBe([[1, 0], [1, 0], [1, 1], [0, 0]])
+    $this->travel(899)->seconds();
+    expect($run())->toBe([0, 1]);
+
+    $this->travel(1)->seconds();
+    expect($run())->toBe([1, 2]);
+
+    $this->travel(3600)->seconds();
+    $last = RmQ::deleteAll(after: 0);
+
+    expect([$last->failed, $last->exhausted])->toBe([1, 1])
         ->and(RmqFile::query()->sole())
         ->attempts->toBe(3)
+        ->next_attempt_at->toBeNull()
         ->error->toBe('Access Denied');
+
+    $this->travel(1)->years();
+    expect($run())->toBe([0, 3]);
+});
+
+it('repeats the last backoff delay', function () {
+    config(['rm-q.max_attempts' => 4, 'rm-q.backoff' => [60]]);
+    $this->freezeSecond();
+    brokenDisk('Access Denied');
+    RmQ::stage('file.txt', 'broken');
+
+    RmQ::deleteAll(after: 0);
+
+    foreach ([2, 3] as $attempts) {
+        $this->travel(59)->seconds();
+        expect(RmQ::deleteAll(after: 0)->processed())->toBe(0);
+
+        $this->travel(1)->seconds();
+        RmQ::deleteAll(after: 0);
+        expect(RmqFile::query()->sole()->attempts)->toBe($attempts);
+    }
+});
+
+it('leaves a file waiting for its backoff out of the count', function () {
+    config(['rm-q.backoff' => [900]]);
+    $this->freezeSecond();
+    brokenDisk('Access Denied');
+    RmQ::stage('file.txt', 'broken');
+    RmQ::deleteAll(after: 0);
+
+    expect(RmQ::countDeletable(0))->toBe(0);
+
+    $this->travel(900)->seconds();
+    expect(RmQ::countDeletable(0))->toBe(1);
+});
+
+it('rejects an invalid backoff', function (mixed $backoff) {
+    config(['rm-q.backoff' => $backoff]);
+
+    expect(fn () => RmQ::deleteAll())->toThrow(RmqException::class, 'rm-q.backoff');
+})->with([
+    'empty' => [[]],
+    'not a list' => [900],
+    'negative delay' => [[900, -1]],
+    'not a number' => [['15m']],
+    'keyed' => [['first' => 900]],
+]);
+
+it('accepts numeric strings in the backoff', function () {
+    config(['rm-q.backoff' => ['900']]);
+    $this->freezeSecond();
+    brokenDisk('Access Denied');
+    RmQ::stage('file.txt', 'broken');
+
+    RmQ::deleteAll(after: 0);
+
+    expect(RmqFile::query()->sole()->next_attempt_at->equalTo(now()->addSeconds(900)))->toBeTrue();
 });
 
 it('removes the row of a retried file once it succeeds', function () {
@@ -183,18 +248,22 @@ it('removes the row of a retried file once it succeeds', function () {
     RmQ::stage('file.txt', 'flaky');
 
     RmQ::deleteAll(after: 0);
+    $this->travel(1)->days();
     $retry = RmQ::deleteAll(after: 0);
 
     expect($retry->deleted)->toBe(1)
         ->and(RmqFile::query()->count())->toBe(0);
 });
 
-it('counts the attempt before deleting, so a run that dies still uses it up', function () {
+it('counts the attempt and its backoff before deleting, so a run that dies still uses them up', function () {
     config(['filesystems.disks.slow' => ['driver' => 'local', 'root' => $this->temporaryDirectory()]]);
+    $this->freezeSecond();
     $attemptsDuringDelete = null;
+    $nextAttemptDuringDelete = null;
     $disk = Mockery::mock(FilesystemContract::class);
-    $disk->shouldReceive('delete')->andReturnUsing(function () use (&$attemptsDuringDelete) {
+    $disk->shouldReceive('delete')->andReturnUsing(function () use (&$attemptsDuringDelete, &$nextAttemptDuringDelete) {
         $attemptsDuringDelete = RmqFile::query()->sole()->attempts;
+        $nextAttemptDuringDelete = RmqFile::query()->sole()->next_attempt_at;
 
         return true;
     });
@@ -203,7 +272,8 @@ it('counts the attempt before deleting, so a run that dies still uses it up', fu
 
     RmQ::deleteAll(after: 0);
 
-    expect($attemptsDuringDelete)->toBe(1);
+    expect($attemptsDuringDelete)->toBe(1)
+        ->and($nextAttemptDuringDelete?->equalTo(now()->addSeconds(900)))->toBeTrue();
 });
 
 it('leaves alone the files that used up their attempts', function () {

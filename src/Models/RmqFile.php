@@ -17,6 +17,7 @@ use Medilies\RmQ\Exceptions\RmqException;
  * @property string $disk
  * @property CarbonInterface $staged_at In the app timezone; stored in UTC.
  * @property int $attempts
+ * @property ?CarbonInterface $next_attempt_at In the app timezone; stored in UTC.
  * @property ?string $error
  */
 final class RmqFile extends Model
@@ -69,6 +70,7 @@ final class RmqFile extends Model
         return [
             'attempts' => 'integer',
             'staged_at' => UtcDateTime::class,
+            'next_attempt_at' => UtcDateTime::class,
         ];
     }
 }
