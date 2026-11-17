@@ -3,60 +3,31 @@
 namespace Medilies\RmQ;
 
 use Carbon\CarbonInterface;
-use Closure;
 use Illuminate\Contracts\Filesystem\Factory as FilesystemFactory;
-use Illuminate\Database\Connection;
-use Illuminate\Database\DetectsConcurrencyErrors;
+use Illuminate\Database\DatabaseTransactionRecord;
+use Illuminate\Database\DatabaseTransactionsManager;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Events\FileDeletionFailed;
 use Medilies\RmQ\Events\StagedFilesProcessed;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Models\RmqFile;
-use Medilies\RmQ\Support\Outcome;
 use Medilies\RmQ\Support\Paths;
-use Medilies\RmQ\Support\Settings;
 use Stringable;
 use Throwable;
 
 /**
- * Bound as a scoped singleton: one instance per request (Octane) or job (queue worker).
- *
- * The database row is the source of truth: staging is a plain INSERT that joins whatever transaction is open
- * on the rm-q connection, and only committed rows are ever swept. Sweeps claim rows atomically, so each row is
- * processed by exactly one sweep.
+ * Staging is a plain INSERT that joins whatever transaction is open on the rm-q connection, so only committed rows
+ * are ever deleted. Runs must not overlap: schedule the command withoutOverlapping() and onOneServer().
  */
 class RmQ
 {
-    use DetectsConcurrencyErrors;
-
-    /** 6 columns per row: stays well below SQL Server's 2100 bindings limit. */
+    /** 3 columns per row: stays well below SQL Server's 2100 bindings limit. */
     private const int INSERT_CHUNK = 150;
-
-    /** Tries per sweep statement when it loses a deadlock or a lock race. */
-    private const int STATEMENT_ATTEMPTS = 5;
-
-    private readonly string $instance;
-
-    /** Whether this instance staged rows that no sweep has picked up yet. */
-    private bool $pending = false;
-
-    /** The event dispatcher and disks are resolved at call time, so fakes work whenever they're installed. */
-    public function __construct()
-    {
-        $this->instance = (string) Str::ulid();
-    }
-
-    public function instanceId(): string
-    {
-        return $this->instance;
-    }
 
     /**
      * Stage files for deletion. The rows join (and roll back with) any transaction open on the rm-q connection.
@@ -69,286 +40,138 @@ class RmQ
     public function stage(string|Stringable|iterable $paths, ?string $disk = null): int
     {
         $paths = Paths::normalize($paths, $disk);
-
-        if ($paths === []) {
-            return 0;
-        }
-
         $now = Date::now();
 
         foreach (array_chunk($paths, self::INSERT_CHUNK) as $chunk) {
             RmqFile::query()->insert(array_map(fn (string $path): array => [
                 'path' => $path,
                 'disk' => $disk,
-                'instance' => $this->instance,
-                'status' => Status::Staged->value,
-                'attempts' => 0,
                 'staged_at' => $now,
             ], $chunk));
         }
-
-        $this->pending = true;
 
         return count($paths);
     }
 
     /**
-     * Run the callback in a transaction on the rm-q connection.
-     *
-     * @template TReturn
-     *
-     * @param  Closure(Connection): TReturn  $callback
-     * @return TReturn
-     */
-    public function transaction(Closure $callback, int $attempts = 1): mixed
-    {
-        if ($attempts < 1) {
-            throw RmqException::invalidArgument('attempts', 'an integer greater than or equal to 1');
-        }
-
-        return $this->connection()->transaction($callback, $attempts);
-    }
-
-    /**
-     * Delete the files staged by this instance (this request or job).
-     *
-     * Inside a transaction, the deletion is deferred until the outermost commit, and dropped on rollback.
-     */
-    public function delete(): void
-    {
-        if (! $this->pending) {
-            return;
-        }
-
-        $this->whenNoTransaction(function (): void {
-            if (! $this->pending) {
-                return;
-            }
-
-            $report = new DeletionReport;
-
-            $this->sweep(fn (Builder $query) => $query
-                ->where('instance', $this->instance)
-                ->where('status', Status::Staged->value), $report);
-
-            $this->pending = false;
-
-            $this->finish($report);
-        });
-    }
-
-    /**
-     * Delete every staged file whose grace period is over, reclaim abandoned claims, and retry failures.
+     * Delete the files whose grace period is over, oldest first, retrying the failures that have attempts left.
      *
      * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after`.
-     * @param  int|null  $limit  Maximum number of rows to process.
+     * @param  int|null  $limit  Maximum number of files to process.
      *
      * @throws RmqException When called inside a transaction, or with invalid arguments or config.
      */
     public function deleteAll(?int $after = null, ?int $limit = null): DeletionReport
     {
-        if ($after !== null && $after < 0) {
-            throw RmqException::invalidArgument('after', 'an integer greater than or equal to 0');
-        }
-
         if ($limit !== null && $limit < 1) {
             throw RmqException::invalidArgument('limit', 'an integer greater than or equal to 1');
         }
 
-        if ($this->transactionPending()) {
+        $cutoff = $this->cutoff($after);
+
+        if ($this->insideTransaction()) {
             throw RmqException::insideTransaction();
         }
 
-        $after ??= Settings::int('after');
-        $start = Date::now();
-        $report = new DeletionReport($limit);
+        $chunk = $this->setting('chunk', 1);
+        $maxAttempts = $this->setting('max_attempts', 1);
+        $remaining = $limit ?? PHP_INT_MAX;
+        $lastId = 0;
+        $deleted = 0;
+        $failed = 0;
+        $exhausted = 0;
 
-        $this->sweep(fn (Builder $query) => $this->abandoned($query, $start), $report);
-        $this->sweep(fn (Builder $query) => $this->stagedBefore($query, $start->copy()->subSeconds($after)), $report);
-        $this->sweep(fn (Builder $query) => $this->retryable($query, $start), $report);
+        while ($remaining > 0) {
+            // The write connection: a lagging read replica could return rows that are already gone.
+            $files = $this->deletable(RmqFile::query()->useWritePdo(), $cutoff, $maxAttempts)
+                ->where('id', '>', $lastId)
+                ->orderBy('id')
+                ->limit(min($chunk, $remaining))
+                ->get(['id', 'path', 'disk', 'attempts']);
 
-        $this->finish($report);
+            if ($files->isEmpty()) {
+                break;
+            }
+
+            foreach ($files as $file) {
+                $lastId = $file->id;
+                $remaining--;
+
+                // Counted before deleting: a file whose deletion kills the run still uses up its attempts.
+                if (RmqFile::query()->whereKey($file->id)->increment('attempts') === 0) {
+                    continue; // Removed meanwhile.
+                }
+
+                $error = $this->deleteFile($file);
+
+                if ($error === null) {
+                    RmqFile::query()->whereKey($file->id)->delete();
+                    $deleted++;
+
+                    continue;
+                }
+
+                RmqFile::query()->whereKey($file->id)->update(['error' => $error]);
+
+                $attempts = $file->attempts + 1;
+                $failed++;
+                $exhausted += (int) ($attempts >= $maxAttempts);
+
+                Event::dispatch(new FileDeletionFailed(
+                    $file->id, $file->path, $file->disk, $error, $attempts, $attempts < $maxAttempts,
+                ));
+            }
+        }
+
+        $report = new DeletionReport($deleted, $failed, $exhausted);
+
+        Event::dispatch(new StagedFilesProcessed($report));
 
         return $report;
     }
 
     /**
-     * How many rows deleteAll() would process right now, per pass.
+     * How many files deleteAll() would process right now.
      *
      * @param  int|null  $after  Grace period in seconds; defaults to `rm-q.after`.
-     * @return array{abandoned: int, staged: int, retries: int}
      *
      * @throws RmqException With invalid arguments or config.
      */
-    public function countDeletable(?int $after = null): array
+    public function countDeletable(?int $after = null): int
+    {
+        return $this->deletable(RmqFile::query(), $this->cutoff($after), $this->setting('max_attempts', 1))->count();
+    }
+
+    /** Files staged at or before the cutoff are past their grace period. */
+    private function cutoff(?int $after): CarbonInterface
     {
         if ($after !== null && $after < 0) {
             throw RmqException::invalidArgument('after', 'an integer greater than or equal to 0');
         }
 
-        $after ??= Settings::int('after');
-        $now = Date::now();
-
-        return [
-            'abandoned' => $this->abandoned(RmqFile::query(), $now)->count(),
-            'staged' => $this->stagedBefore(RmqFile::query(), $now->copy()->subSeconds($after))->count(),
-            'retries' => $this->retryable(RmqFile::query(), $now)->count(),
-        ];
+        return Date::now()->subSeconds($after ?? $this->setting('after', 0));
     }
 
     /**
-     * Rows whose sweep died mid-chunk.
+     * Files whose grace period is over and that have attempts left.
      *
      * @param  Builder<RmqFile>  $query
      * @return Builder<RmqFile>
      */
-    private function abandoned(Builder $query, CarbonInterface $now): Builder
+    private function deletable(Builder $query, CarbonInterface $cutoff, int $maxAttempts): Builder
     {
         return $query
-            ->where('status', Status::Processing->value)
-            ->where('claimed_at', '<=', $now->copy()->subSeconds(Settings::int('claim_timeout', 1)));
+            ->where('staged_at', '<=', $cutoff)
+            ->where('attempts', '<', $maxAttempts);
     }
 
-    /**
-     * Staged rows whose grace period is over.
-     *
-     * @param  Builder<RmqFile>  $query
-     * @return Builder<RmqFile>
-     */
-    private function stagedBefore(Builder $query, CarbonInterface $cutoff): Builder
-    {
-        return $query
-            ->where('status', Status::Staged->value)
-            ->where('staged_at', '<=', $cutoff);
-    }
-
-    /**
-     * Failed rows with attempts left; a row that failed during this run waits for the next one.
-     *
-     * @param  Builder<RmqFile>  $query
-     * @return Builder<RmqFile>
-     */
-    private function retryable(Builder $query, CarbonInterface $runStart): Builder
-    {
-        return $query
-            ->where('status', Status::Failed->value)
-            ->where('attempts', '<', Settings::int('max_attempts', 1))
-            ->where('processed_at', '<', $runStart);
-    }
-
-    /**
-     * Claim eligible rows chunk by chunk, delete their files, and record the outcomes.
-     *
-     * @param  Closure(Builder<RmqFile>): Builder<RmqFile>  $eligible
-     */
-    private function sweep(Closure $eligible, DeletionReport $report): void
-    {
-        $token = (string) Str::ulid();
-        $chunk = Settings::int('chunk', 1);
-        $maxAttempts = Settings::int('max_attempts', 1);
-
-        while (! $report->limitReached()) {
-            // The write connection: a lagging read replica could hide freshly staged or claimed rows.
-            $ids = $this->retryOnConcurrencyError(fn () => $eligible(RmqFile::query()->useWritePdo())
-                ->limit($report->nextChunkSize($chunk))
-                ->pluck('id')
-                ->all());
-
-            if ($ids === []) {
-                return;
-            }
-
-            // Re-applying the eligibility predicate makes the claim atomic between concurrent sweeps.
-            $claimed = $this->retryOnConcurrencyError(fn () => $eligible(RmqFile::query())
-                ->whereIntegerInRaw('id', $ids)
-                ->increment('attempts', 1, [
-                    'status' => Status::Processing->value,
-                    'claimed_by' => $token,
-                    'claimed_at' => Date::now(),
-                ]));
-
-            if ($claimed === 0) {
-                continue; // Lost to a concurrent sweep.
-            }
-
-            $files = $this->retryOnConcurrencyError(fn () => RmqFile::query()->useWritePdo()
-                ->whereIntegerInRaw('id', $ids)
-                ->where('claimed_by', $token)
-                ->get(['id', 'path', 'disk', 'attempts']));
-
-            $deleted = [];
-            $failed = [];
-            $failures = [];
-
-            foreach ($files as $file) {
-                $outcome = $this->deleteFile($file);
-
-                if ($outcome->deleted) {
-                    $deleted[] = $file->id;
-
-                    continue;
-                }
-
-                $failed[$outcome->error][] = $file->id;
-
-                $willRetry = $file->attempts < $maxAttempts;
-                $report->recordFailure($file->path, $file->disk, $outcome->error, ! $willRetry);
-                $failures[] = new FileDeletionFailed(
-                    $file->id, $file->path, $file->disk, $outcome->error, $file->attempts, $willRetry,
-                );
-            }
-
-            $now = Date::now();
-
-            // Conditional on the claim: a row reclaimed by another sweep meanwhile is left alone.
-            if ($deleted !== []) {
-                $this->retryOnConcurrencyError(fn () => RmqFile::query()
-                    ->whereIntegerInRaw('id', $deleted)
-                    ->where('claimed_by', $token)
-                    ->update(['status' => Status::Deleted->value, 'processed_at' => $now, 'error' => null]));
-
-                $report->recordDeleted(count($deleted));
-            }
-
-            foreach ($failed as $error => $failedIds) {
-                $this->retryOnConcurrencyError(fn () => RmqFile::query()
-                    ->whereIntegerInRaw('id', $failedIds)
-                    ->where('claimed_by', $token)
-                    ->update(['status' => Status::Failed->value, 'processed_at' => $now, 'error' => (string) $error]));
-            }
-
-            // Only once the outcomes are recorded: a throwing listener can't leave rows claimed.
-            foreach ($failures as $failure) {
-                Event::dispatch($failure);
-            }
-        }
-    }
-
-    /**
-     * Retry a sweep statement that lost a deadlock or a lock race. Sweeps never run inside a transaction, so each
-     * statement can be retried on its own.
-     *
-     * @template TResult
-     *
-     * @param  Closure(): TResult  $statement
-     * @return TResult
-     */
-    private function retryOnConcurrencyError(Closure $statement): mixed
-    {
-        return retry(
-            self::STATEMENT_ATTEMPTS,
-            fn () => $statement(),
-            fn (int $attempt) => random_int(10, 50) * $attempt,
-            fn (Throwable $e) => $this->causedByConcurrencyError($e),
-        );
-    }
-
-    private function deleteFile(RmqFile $file): Outcome
+    /** @return string|null Why the file could not be deleted, or null once it is gone. */
+    private function deleteFile(RmqFile $file): ?string
     {
         $violation = Paths::violation($file->path, $file->disk);
 
         if ($violation !== null) {
-            return Outcome::failed("The path {$violation}");
+            return "The path {$violation}";
         }
 
         try {
@@ -363,25 +186,25 @@ class RmQ
                 // Flysystem throws with the reason, whatever the disk's `throw` option says.
                 $disk->getDriver()->delete($file->path);
 
-                return Outcome::deleted(); // A missing file counts as deleted, like on S3.
+                return null; // A missing file counts as deleted, like on S3.
             }
 
-            return $disk->delete($file->path) ? Outcome::deleted() : Outcome::failed('The disk could not delete the file');
+            return $disk->delete($file->path) ? null : 'The disk could not delete the file';
         } catch (Throwable $e) {
-            return Outcome::failed(Str::limit($e->getMessage(), 1000));
+            return Str::limit($e->getMessage(), 1000);
         }
     }
 
-    private function deleteLocalFile(string $path): Outcome
+    private function deleteLocalFile(string $path): ?string
     {
         clearstatcache(true, $path);
 
         if (! file_exists($path) && ! is_link($path)) {
-            return Outcome::deleted(); // Already missing.
+            return null; // Already missing.
         }
 
         if (is_dir($path) && ! is_link($path)) {
-            return Outcome::failed('The path is a directory');
+            return 'The path is a directory';
         }
 
         // Laravel's error handler swallows warnings, even suppressed ones, so error_get_last() stays empty.
@@ -400,70 +223,43 @@ class RmQ
         }
 
         if ($deleted) {
-            return Outcome::deleted();
+            return null;
         }
 
         clearstatcache(true, $path);
 
         return file_exists($path) || is_link($path)
-            ? Outcome::failed($error ?? 'unlink() failed')
-            : Outcome::deleted(); // Removed concurrently.
+            ? $error ?? 'unlink() failed'
+            : null; // Removed concurrently.
     }
 
-    private function finish(DeletionReport $report): void
+    /** An integer `rm-q` setting of at least $min. */
+    private function setting(string $key, int $min): int
     {
-        if ($report->failed() > 0) {
-            Log::warning("rm-q: {$report->failed()} staged file(s) could not be deleted.", [
-                'exhausted' => $report->exhausted(),
-                'sample' => $report->failureSample(),
-            ]);
+        $value = Config::integer("rm-q.{$key}");
+
+        if ($value < $min) {
+            throw RmqException::invalidConfig("rm-q.{$key}", "an integer greater than or equal to {$min}");
         }
 
-        Event::dispatch(new StagedFilesProcessed($report));
-    }
-
-    /**
-     * Run the work now when no transaction is pending, otherwise after the outermost commit (dropped on rollback).
-     *
-     * Laravel's after-commit callbacks are not connection-scoped: a callback may fire when another connection
-     * commits, so a deferred callback checks again before running.
-     */
-    private function whenNoTransaction(Closure $work): void
-    {
-        if (! $this->transactionPending()) {
-            $work(); // Synchronous: exceptions reach the caller.
-
-            return;
-        }
-
-        $this->connection()->afterCommit(function () use ($work): void {
-            try {
-                $this->whenNoTransaction($work);
-            } catch (Throwable $e) {
-                report($e); // Never throw out of an already committed DB::transaction().
-            }
-        });
+        return $value;
     }
 
     /** Whether a transaction is open on the rm-q connection, ignoring the wrapping transaction of RefreshDatabase. */
-    private function transactionPending(): bool
+    private function insideTransaction(): bool
     {
-        if ($this->connection()->transactionLevel() === 0) {
+        $connection = (new RmqFile)->getConnection();
+
+        if ($connection->transactionLevel() === 0) {
             return false;
         }
 
-        // The level counts RefreshDatabase's wrapping transaction, which takes no after-commit callbacks.
-        $pending = true;
+        /** @var DatabaseTransactionsManager $transactions */
+        $transactions = app('db.transactions');
 
-        $this->connection()->afterCommit(function () use (&$pending): void {
-            $pending = false;
-        });
-
-        return $pending;
-    }
-
-    private function connection(): Connection
-    {
-        return DB::connection(Settings::connection());
+        // RefreshDatabase's manager leaves its wrapping transaction out of the applicable ones.
+        return $transactions->callbackApplicableTransactions()->contains(
+            fn (DatabaseTransactionRecord $transaction) => $transaction->connection === $connection->getName(),
+        );
     }
 }

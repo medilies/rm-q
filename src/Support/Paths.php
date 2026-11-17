@@ -74,10 +74,14 @@ final class Paths
 
     private static function isAllowed(string $path): bool
     {
-        $directories = Settings::allowedDirectories();
+        $directories = Config::get('rm-q.allowed_directories');
 
         if ($directories === null) {
             return true;
+        }
+
+        if (! is_array($directories)) {
+            throw RmqException::invalidConfig('rm-q.allowed_directories', 'null or a list of absolute directories');
         }
 
         // unlink() follows symlinked directories, so compare where the parent directory really is. The file itself
@@ -87,6 +91,10 @@ final class Paths
         $path = self::comparable(rtrim($parent === false ? dirname($path) : $parent, '/\\').'/'.basename($path));
 
         foreach ($directories as $directory) {
+            if (! is_string($directory) || ! self::isAbsolute($directory)) {
+                throw RmqException::invalidConfig('rm-q.allowed_directories', 'null or a list of absolute directories');
+            }
+
             $root = realpath($directory);
 
             if (str_starts_with($path, rtrim(self::comparable($root === false ? $directory : $root), '/').'/')) {

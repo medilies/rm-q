@@ -4,24 +4,19 @@ namespace TestApp\Models;
 
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
-use Medilies\RmQ\Models\RmqStageOnDeleteTrait;
+use Medilies\RmQ\Concerns\StagesFilesOnDelete;
 
-/** Files on disks: `file_path` on s3, `thumb_path` on the model's default disk. */
+/** Files on disks: `file_path` on s3, `thumb_path` on public. */
 class Document extends Model
 {
-    use RmqStageOnDeleteTrait;
+    use StagesFilesOnDelete;
 
     protected $guarded = [];
 
-    /** @return array<int|string, ?string> */
-    public function listFilePathColumns(): array
+    /** @return array<string, ?string> */
+    public function rmqFileColumns(): array
     {
-        return ['file_path' => 's3', 'thumb_path'];
-    }
-
-    public function rmqDisk(): ?string
-    {
-        return 'public';
+        return ['file_path' => 's3', 'thumb_path' => 'public'];
     }
 
     /**

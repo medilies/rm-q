@@ -1,6 +1,7 @@
 <?php
 
-use Medilies\RmQ\Enums\Status;
+use Illuminate\Support\Facades\DB;
+use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
@@ -10,7 +11,7 @@ it('stages exactly once when a transaction is retried after a deadlock', functio
     $file = $this->temporaryFile();
     $attempts = 0;
 
-    RmQ::transaction(function () use ($file, &$attempts) {
+    DB::transaction(function () use ($file, &$attempts) {
         RmQ::stage($file);
 
         if (++$attempts === 1) {
@@ -22,38 +23,15 @@ it('stages exactly once when a transaction is retried after a deadlock', functio
         ->and(RmqFile::query()->count())->toBe(1);
 });
 
-it('defers delete() until the commit', function () {
-    $file = $this->temporaryFile();
-
-    RmQ::transaction(function () use ($file) {
-        RmQ::stage($file);
-        RmQ::delete();
-
-        expect($file)->toBeFile();
-    });
-
-    expect($file)->not->toBeFile()
-        ->and(RmqFile::query()->sole()->status)->toBe(Status::Deleted);
-});
-
-it('drops a deferred delete() on rollback', function () {
-    $file = $this->temporaryFile();
-
-    expect(fn () => RmQ::transaction(function () use ($file) {
-        RmQ::stage($file);
-        RmQ::delete();
-
-        throw new RuntimeException('Rolled back');
-    }))->toThrow(RuntimeException::class);
-
-    expect($file)->toBeFile()
-        ->and(RmqFile::query()->count())->toBe(0);
+it('refuses deleteAll() inside a transaction', function () {
+    expect(fn () => DB::transaction(fn () => RmQ::deleteAll(after: 0)))
+        ->toThrow(RmqException::class, 'cannot run inside a transaction');
 });
 
 it('runs deleteAll() outside of a transaction', function () {
     $file = $this->temporaryFile();
     RmQ::stage($file);
 
-    expect(RmQ::deleteAll(after: 0)->deleted())->toBe(1)
+    expect(RmQ::deleteAll(after: 0)->deleted)->toBe(1)
         ->and($file)->not->toBeFile();
 });

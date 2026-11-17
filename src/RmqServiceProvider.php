@@ -2,30 +2,20 @@
 
 namespace Medilies\RmQ;
 
-use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
-use Medilies\RmQ\Commands\RmqCleanupCommand;
 use Medilies\RmQ\Commands\RmqDeleteCommand;
 use Medilies\RmQ\Commands\RmqRetryCommand;
 use Medilies\RmQ\Commands\RmqStatsCommand;
-use Medilies\RmQ\Middleware\RmqMiddleware;
 
 class RmqServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/rm-q.php', 'rm-q');
-
-        // One instance per request (Octane) or job (queue worker).
-        $this->app->scoped(RmQ::class);
     }
 
     public function boot(): void
     {
-        $this->callAfterResolving('router', function (Router $router): void {
-            $router->aliasMiddleware('rm-q', RmqMiddleware::class);
-        });
-
         if (! $this->app->runningInConsole()) {
             return;
         }
@@ -40,7 +30,6 @@ class RmqServiceProvider extends ServiceProvider
 
         $this->commands([
             RmqDeleteCommand::class,
-            RmqCleanupCommand::class,
             RmqStatsCommand::class,
             RmqRetryCommand::class,
         ]);

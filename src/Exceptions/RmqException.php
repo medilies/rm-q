@@ -16,6 +16,11 @@ class RmqException extends Exception
         return new self("Cannot stage files on disk [{$disk}]: the disk is not configured.");
     }
 
+    public static function connectionMismatch(string $model, ?string $connection, ?string $rmqConnection): self
+    {
+        return new self("Cannot stage the files of [{$model}]: it is on the [{$connection}] connection and the rm-q table on [{$rmqConnection}], so the staging would not roll back with the deletion. Set rm-q.connection.");
+    }
+
     public static function invalidConfig(string $key, string $expected): self
     {
         return new self("The [{$key}] config must be {$expected}.");

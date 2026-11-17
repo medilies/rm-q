@@ -4,13 +4,10 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use League\Flysystem\FilesystemOperator;
 use League\Flysystem\Local\LocalFilesystemAdapter;
 use League\Flysystem\UnableToDeleteFile;
-use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Models\RmqFile;
 use Tests\IntegrationTestCase;
 use Tests\TestCase;
@@ -32,7 +29,7 @@ function brokenDisk(string $reason, string $name = 'broken', bool $throw = false
 }
 
 /**
- * A row staged by another request or job, possibly long ago.
+ * A staged row, possibly staged long ago or already attempted.
  *
  * @param  array<string, mixed>  $attributes
  */
@@ -41,36 +38,9 @@ function stagedRow(string $path, array $attributes = []): RmqFile
     $id = RmqFile::query()->insertGetId([
         'path' => $path,
         'disk' => null,
-        'instance' => (string) Str::ulid(),
-        'status' => Status::Staged->value,
-        'attempts' => 0,
         'staged_at' => Date::now(),
         ...$attributes,
     ]);
 
     return RmqFile::query()->findOrFail($id);
-}
-
-/**
- * Makes the next $times claim statements of a sweep fail with the given error, before they reach the database.
- *
- * @return object{count: int} How many claims failed so far.
- */
-function failClaims(int $times, string $error): object
-{
-    $failures = new class
-    {
-        public int $count = 0;
-    };
-
-    DB::connection()->beforeExecuting(function (string $query) use ($failures, $times, $error) {
-        // The claim is the only statement that increments the attempts.
-        if (preg_match('/^update\b.*attempts\W*\s*\+\s*1/i', $query) === 1 && $failures->count < $times) {
-            $failures->count++;
-
-            throw new RuntimeException($error);
-        }
-    });
-
-    return $failures;
 }

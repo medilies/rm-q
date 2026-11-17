@@ -13,19 +13,13 @@ return [
      * Grace period, in seconds, before `rm-q:delete` / RmQ::deleteAll() deletes a staged file: time to notice a bug
      * or restore a database backup before the files are gone. Default: 1 day.
      */
-    'after' => env('RM_Q_AFTER', 60 * 60 * 24),
+    'after' => (int) env('RM_Q_AFTER', 60 * 60 * 24),
 
-    /* Rows claimed and processed per batch. */
+    /* Rows read and processed per batch. */
     'chunk' => 500,
 
     /* A failed deletion is retried by `rm-q:delete` until it reaches this many attempts. */
     'max_attempts' => 3,
-
-    /* Seconds after which a row claimed by a sweep that died is reclaimed. Keep it above the time one chunk takes. */
-    'claim_timeout' => 60 * 60,
-
-    /* How long `rm-q:cleanup` keeps processed rows, in days. */
-    'cleanup_after_days' => 30,
 
     /*
      * Optional allowlist of absolute directories that files staged without a disk must live in.

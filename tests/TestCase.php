@@ -3,10 +3,8 @@
 namespace Tests;
 
 use Illuminate\Filesystem\Filesystem;
-use Illuminate\Support\Facades\Facade;
 use Medilies\RmQ\RmqServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
-use TestApp\TestServiceProvider;
 
 use function Orchestra\Testbench\load_migration_paths;
 
@@ -23,10 +21,7 @@ abstract class TestCase extends Orchestra
 
     protected function getPackageProviders($app): array
     {
-        return [
-            RmqServiceProvider::class,
-            TestServiceProvider::class,
-        ];
+        return [RmqServiceProvider::class];
     }
 
     /** Config only: models must not be booted before the event dispatcher exists. */
@@ -92,13 +87,5 @@ abstract class TestCase extends Orchestra
     public function temporaryFile(): string
     {
         return $this->temporaryFiles()[0];
-    }
-
-    /** Simulates what Octane and queue workers do between two requests or jobs. */
-    public function newLifecycle(): void
-    {
-        $this->app?->forgetScopedInstances();
-
-        Facade::clearResolvedInstances();
     }
 }

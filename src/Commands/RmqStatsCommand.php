@@ -3,9 +3,8 @@
 namespace Medilies\RmQ\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Date;
-use Medilies\RmQ\Enums\Status;
-use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
 
@@ -17,60 +16,33 @@ class RmqStatsCommand extends Command
 
     public function handle(): int
     {
-        $statuses = [];
+        $pending = RmqFile::query()->where('attempts', '<', Config::integer('rm-q.max_attempts'));
 
-        foreach (RmqFile::query()->toBase()
-            ->select('status')
-            ->selectRaw('COUNT(*) as aggregate')
-            ->groupBy('status')
-            ->orderBy('status')
-            ->get() as $row) {
-            $status = $this->toInt($row->status);
-
-            $statuses[Status::tryFrom($status)->name ?? "Unknown ({$status})"] = $this->toInt($row->aggregate);
-        }
-
-        $oldestStaged = RmqFile::query()->where('status', Status::Staged->value)->min('staged_at');
+        $oldestStaged = $pending->clone()->min('staged_at');
         $oldestStaged = is_string($oldestStaged) ? Date::parse($oldestStaged) : null;
 
-        $deletable = RmQ::countDeletable();
-
-        $gaveUp = RmqFile::query()->gaveUp()->count();
+        $stats = [
+            'pending' => $pending->clone()->count(),
+            'deletable_now' => RmQ::countDeletable(),
+            'retrying' => $pending->clone()->whereNotNull('error')->count(),
+            'gave_up' => RmqFile::query()->gaveUp()->count(),
+            'oldest_staged_at' => $oldestStaged?->toIso8601String(),
+        ];
 
         if ($this->option('json')) {
-            $this->line(json_encode([
-                'statuses' => $statuses,
-                'total' => array_sum($statuses),
-                'oldest_staged_at' => $oldestStaged?->toIso8601String(),
-                'deletable_now' => $deletable,
-                'failed_gave_up' => $gaveUp,
-            ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+            $this->line(json_encode($stats, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
 
             return self::SUCCESS;
         }
 
-        $rows = [];
-
-        foreach ($statuses as $label => $count) {
-            $rows[] = [$label, $count];
-        }
-
-        $this->table(['Status', 'Count'], [...$rows, ['Total', array_sum($statuses)]]);
-
+        $this->components->twoColumnDetail('Pending', (string) $stats['pending']);
+        $this->components->twoColumnDetail('  Deletable now', (string) $stats['deletable_now']);
+        $this->components->twoColumnDetail('  Failed, will retry', (string) $stats['retrying']);
+        $this->components->twoColumnDetail('Failed, gave up', (string) $stats['gave_up']);
         $this->components->twoColumnDetail('Oldest staged file', $oldestStaged === null
             ? '-'
             : "{$oldestStaged->toDateTimeString()} ({$oldestStaged->diffForHumans()})");
-        $this->components->twoColumnDetail('Deletable now', (string) array_sum($deletable));
-        $this->components->twoColumnDetail('  Staged, past the grace period', (string) $deletable['staged']);
-        $this->components->twoColumnDetail('  Abandoned by a crashed run', (string) $deletable['abandoned']);
-        $this->components->twoColumnDetail('  Failed, to retry', (string) $deletable['retries']);
-        $this->components->twoColumnDetail('Failed, gave up', (string) $gaveUp);
 
         return self::SUCCESS;
-    }
-
-    private function toInt(mixed $value): int
-    {
-        return is_numeric($value) ? (int) $value : throw new RmqException('Expected a numeric value from the database');
     }
 }

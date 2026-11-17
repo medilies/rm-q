@@ -1,9 +1,10 @@
 <?php
 
-namespace Medilies\RmQ\Models;
+namespace Medilies\RmQ\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
-use LogicException;
+use Medilies\RmQ\Exceptions\RmqException;
+use Medilies\RmQ\Models\RmqFile;
 use Medilies\RmQ\RmQ;
 use Medilies\RmQ\Support\Paths;
 
@@ -15,7 +16,7 @@ use Medilies\RmQ\Support\Paths;
  *
  * @mixin Model
  */
-trait RmqStageOnDeleteTrait
+trait StagesFilesOnDelete
 {
     /**
      * Paths read while deleting, staged once the row is actually gone.
@@ -24,7 +25,7 @@ trait RmqStageOnDeleteTrait
      */
     private array $rmqPathsByDisk = [];
 
-    public static function bootRmqStageOnDeleteTrait(): void
+    public static function bootStagesFilesOnDelete(): void
     {
         // Before the row is gone: unselected columns can still be read, and invalid paths abort the deletion.
         static::deleting(function (self $model): void {
@@ -46,18 +47,12 @@ trait RmqStageOnDeleteTrait
     }
 
     /**
-     * The columns holding file paths: a list (`['path']`, on the rmqDisk() disk) or a map of column to disk
-     * (`['avatar' => 's3', 'thumbnail']`). A null disk means absolute local paths.
+     * The columns holding file paths, mapped to their disk (`['avatar' => 's3']`). A null disk means absolute
+     * local paths.
      *
-     * @return array<int|string, ?string>
+     * @return array<string, ?string>
      */
-    abstract public function listFilePathColumns(): array;
-
-    /** The disk of the columns listed without one. Null means absolute local paths. */
-    public function rmqDisk(): ?string
-    {
-        return null;
-    }
+    abstract public function rmqFileColumns(): array;
 
     /** A SoftDeletes model being trashed rather than force-deleted. */
     private static function rmqIsSoftDeleting(Model $model): bool
@@ -68,18 +63,15 @@ trait RmqStageOnDeleteTrait
     /** @return array<string, list<string>> Paths keyed by disk ('' for local paths). */
     private function rmqCollectPaths(): array
     {
-        $disks = [];
+        // On another connection, the staging would commit even if the deletion rolls back.
+        $connection = $this->getConnection()->getName();
+        $rmqConnection = (new RmqFile)->getConnection()->getName();
 
-        foreach ($this->listFilePathColumns() as $key => $value) {
-            if (is_string($key)) {
-                $disks[$key] = $value;
-            } elseif (is_string($value) && $value !== '') {
-                $disks[$value] = $this->rmqDisk();
-            } else {
-                throw new LogicException(static::class.'::listFilePathColumns() must list column names, or map them to disks.');
-            }
+        if ($connection !== $rmqConnection) {
+            throw RmqException::connectionMismatch(static::class, $connection, $rmqConnection);
         }
 
+        $disks = $this->rmqFileColumns();
         $values = $this->getRawOriginal();
         $missing = array_values(array_diff(array_keys($disks), array_keys($values)));
 

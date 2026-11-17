@@ -1,12 +1,9 @@
 <?php
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Medilies\RmQ\Enums\Status;
 use Medilies\RmQ\Exceptions\RmqException;
 use Medilies\RmQ\Facades\RmQ;
 use Medilies\RmQ\Models\RmqFile;
-use Medilies\RmQ\Models\RmqStageOnDeleteTrait;
 use TestApp\Models\Document;
 use TestApp\Models\Picture;
 use TestApp\Models\SoftPicture;
@@ -25,10 +22,9 @@ it('stages the files of a deleted model', function () {
 
     expect(RmqFile::query()->sole())
         ->path->toBe($file)
-        ->disk->toBeNull()
-        ->status->toBe(Status::Staged);
+        ->disk->toBeNull();
 
-    RmQ::delete();
+    RmQ::deleteAll(after: 0);
 
     expect($file)->not->toBeFile();
 });
@@ -113,24 +109,4 @@ it('refuses to delete a model whose path is invalid', function () {
 
     expect(Picture::query()->count())->toBe(1)
         ->and(RmqFile::query()->count())->toBe(0);
-});
-
-it('rejects a malformed column list', function () {
-    $model = new class extends Model
-    {
-        use RmqStageOnDeleteTrait;
-
-        protected $table = 'pictures';
-
-        protected $guarded = [];
-
-        public function listFilePathColumns(): array
-        {
-            return [null];
-        }
-    };
-
-    $model->forceFill(['path' => '/tmp/file.txt'])->save();
-
-    expect(fn () => $model->delete())->toThrow(LogicException::class, 'listFilePathColumns() must list column names');
 });
